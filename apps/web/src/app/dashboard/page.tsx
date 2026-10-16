@@ -122,8 +122,11 @@ function CreateWorkspace({
 
       <form onSubmit={onCreate} className="mt-3 flex flex-wrap items-end gap-3">
         <div className="flex-1">
-          <label className="block text-sm font-medium">Workspace name</label>
+          <label htmlFor="workspace-name" className="block text-sm font-medium">
+            Workspace name
+          </label>
           <input
+            id="workspace-name"
             required
             autoFocus
             value={name}
@@ -134,8 +137,11 @@ function CreateWorkspace({
         </div>
         {choice.industryId === "__other__" && (
           <div>
-            <label className="block text-sm font-medium">Industry</label>
+            <label htmlFor="other-industry" className="block text-sm font-medium">
+              Industry
+            </label>
             <select
+              id="other-industry"
               value={otherIndustry}
               onChange={(e) => setOtherIndustry(e.target.value)}
               className="mt-1 rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"

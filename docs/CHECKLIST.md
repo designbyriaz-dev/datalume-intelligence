@@ -2306,12 +2306,10 @@ picking an arbitrary page.
   fast before spending time on a full Next.js build) — the step didn't
   exist in the original CI workflow because there was nothing real for
   it to run yet.
-- ⬜ Still only `lib/api.ts` and (since the next round below) `lib/format.ts`
-  covered — `lib/auth.tsx` (the auth context/hook) and every page
-  component remain untested. A page/component suite would need `jsdom`
-  or `happy-dom` plus `@testing-library/react`, neither installed yet —
-  a reasonable next step, not done here to keep this round's dependency
-  footprint at zero new packages.
+- ✅ `lib/auth.tsx` and real page components now have test coverage too
+  — see "Post-Phase-7: component and page test coverage" below, which
+  added `jsdom`/`@testing-library/react` (the dependency this bullet
+  previously deferred adding).
 
 ## Post-Phase-7: usage reset countdown
 
@@ -3181,6 +3179,98 @@ blocked on credentials/company information this session doesn't have.
   growth), and repeated the forecast's own honest caveat about not
   anticipating genuine business changes — all generated from the real
   tool result, not invented.
+
+## Post-Phase-7: component and page test coverage
+
+The user picked this explicitly after I laid out what was left: every
+remaining checklist item either needed their resources (Stripe live,
+real cloud credentials), a decision only they could make (deployment
+platform, VAT/dunning policy), or was its own multi-day project (SCIM,
+custom roles). This one was flagged as a reasonable next step the last
+time frontend testing was touched, specifically once someone decided
+to take on the `jsdom`/`@testing-library/react` dependency — which is
+what this round actually does.
+
+- ✅ **New dev dependencies**: `jsdom@30.1.3`,
+  `@testing-library/react@16.3.3`, `@testing-library/jest-dom@7.0.1`,
+  `@testing-library/user-event@14.6.8`, `@vitejs/plugin-react@4.7.0`
+  (needed because `tsconfig.json` sets `jsx: "preserve"` — Next.js's
+  own SWC compiler does the real transform, so Vite/esbuild needs this
+  plugin to understand JSX on its own; confirmed this was the actual
+  cause of a `ReferenceError: React is not defined` failure before
+  adding it, not guessed at).
+- ⚠️ **Found pre-existing vulnerabilities, did not fix them**: installing
+  surfaced `npm audit`'s report of 15 existing vulnerabilities (5
+  moderate, 7 high, 3 critical — mostly a long list of real `next@14.2.15`
+  CVEs, plus `tailwindcss`'s `chokidar`/`braces` chain). Confirmed via
+  `git stash` that the exact same 15 exist independent of anything in
+  this round — not introduced by the new test dependencies. Explicitly
+  did not run `npm audit fix --force` (it would silently jump
+  `tailwindcss` to a breaking v4) — flagged as a separate task instead
+  of bundling a risky framework-version upgrade into a testing-infra
+  change.
+- ✅ **`vitest.config.ts`**: switched `environment` from `"node"` to
+  `"jsdom"` (confirmed the original pure-logic tests still pass fine
+  under it — jsdom is a superset, just slightly more setup overhead per
+  file), added the `@/` → `./src` path alias Vite needs to resolve the
+  same imports Next.js already does, and a new `vitest.setup.ts`
+  importing `@testing-library/jest-dom/vitest` for matchers like
+  `toBeInTheDocument`.
+- 🐛 **Found and fixed a real test-isolation bug while writing the
+  first component test**: `@testing-library/react`'s automatic cleanup
+  between tests only self-registers when it can see a global
+  `afterEach` — this project deliberately doesn't enable vitest's
+  `globals: true` (every file explicitly imports `describe`/`it`/`vi`
+  instead), so renders were silently accumulating across tests in the
+  same file instead of unmounting. Caught immediately by a very visible
+  symptom (typed text appearing seven times over, "multiple elements
+  found" errors) rather than a subtle one. Fixed centrally in
+  `vitest.setup.ts` with an explicit `afterEach(() => cleanup())`
+  rather than repeating it in every test file.
+- ✅ **A small, real accessibility fix, scoped narrowly**: found that
+  no `<label>` in this codebase is ever associated with its `<input>`
+  via `htmlFor`/`id` (checked login, register, and the security page —
+  consistent everywhere, not unique to one page), which meant
+  `getByLabelText` — the standard, recommended testing-library query —
+  couldn't find any of these fields. Fixed it only on the specific
+  inputs these new tests actually exercise (login's email/password/MFA-
+  code fields, the dashboard's workspace-name/industry fields), not
+  as a sweeping pass across every form in the app — that's a much
+  larger, separate cleanup. Verified live: clicking the "Email" label
+  text on the real login page now correctly focuses the email input
+  (confirmed via `document.activeElement.id`), which it didn't before.
+- ✅ **`lib/auth.test.tsx`** (10 tests) — tests `AuthProvider`/`useAuth`
+  via `renderHook`, with a partial mock of `./api` that keeps the real
+  `isMfaRequired` type guard (so these tests exercise the actual
+  discriminator production code uses, not a reimplementation of it) and
+  only replaces the network-calling methods: session restore on mount
+  (both the valid-cookie and no-cookie cases), `login()`'s two branches
+  (direct success vs. `mfaRequired` pausing without setting a session),
+  `completeMfaLogin()`, `register()` (confirming it calls through to
+  `login()`), `logout()` (clearing the session locally even when the
+  server call fails), and `refreshUser()` (including the no-op case
+  with no active session).
+- ✅ **`app/login/page.test.tsx`** (8 tests) — the full MFA two-step
+  login flow end-to-end at the component level: direct login success,
+  a login error shown without redirecting, the MFA step appearing
+  instead of redirecting, completing it with a code and redirecting,
+  an incorrect-code error on that step, the code field stripping
+  non-digit characters, the "Back to log in" link, and the Google SSO
+  button starting the real redirect call.
+- ✅ **`app/dashboard/page.test.tsx`** (8 tests) — the guided
+  workspace-creation flow: auth-gating (loading state, redirect to
+  `/login` when unauthenticated), real industry-pack cards rendering
+  from a mocked `listIndustryPacks` response (including real
+  `suggested_questions` text), picking a pack advancing to step two
+  with no industry dropdown, a full create → reset-to-step-one →
+  appears-in-the-list cycle with the exact arguments
+  `createWorkspace` was called with asserted, "Something else" showing
+  the free-form dropdown and submitting its selected value, an error
+  staying on step two instead of silently resetting, and "Choose a
+  different type" returning to step one without calling the API.
+- ✅ Frontend: 62/62 passing (26 new: 10 + 8 + 8). `npx tsc --noEmit`
+  and `npm run build` both still clean — test files are correctly
+  excluded from the production route output.
 
 ## Known limitations in what's built
 

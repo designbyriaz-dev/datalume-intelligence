@@ -75,8 +75,11 @@ export default function LoginPage() {
 
           <form onSubmit={onSubmitMfaCode} className="mt-8 space-y-4">
             <div>
-              <label className="block text-sm font-medium">Authentication code</label>
+              <label htmlFor="mfa-code" className="block text-sm font-medium">
+                Authentication code
+              </label>
               <input
+                id="mfa-code"
                 required
                 autoFocus
                 inputMode="numeric"
@@ -123,8 +126,11 @@ export default function LoginPage() {
 
         <form onSubmit={onSubmit} className="mt-8 space-y-4">
           <div>
-            <label className="block text-sm font-medium">Email</label>
+            <label htmlFor="login-email" className="block text-sm font-medium">
+              Email
+            </label>
             <input
+              id="login-email"
               required
               type="email"
               value={email}
@@ -134,12 +140,15 @@ export default function LoginPage() {
           </div>
           <div>
             <div className="flex items-center justify-between">
-              <label className="block text-sm font-medium">Password</label>
+              <label htmlFor="login-password" className="block text-sm font-medium">
+                Password
+              </label>
               <Link href="/forgot-password" className="text-xs text-brand-500 hover:underline">
                 Forgot password?
               </Link>
             </div>
             <input
+              id="login-password"
               required
               type="password"
               value={password}
