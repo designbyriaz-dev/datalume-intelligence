@@ -31,7 +31,7 @@ from app.models.workspace import Workspace
 from app.services.datasets import get_dataset_table_dataframe
 from app.services.distributed_lock import release_lock, try_acquire_lock
 from app.services.email import EmailAttachment, EmailMessage, EmailSender
-from app.services.industry_kpis import compute_kpis
+from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, compute_kpis
 from app.services.industry_matching import get_effective_field_mapping
 from app.services.reports import (
     generate_business_finance_report_pdf,
@@ -100,7 +100,8 @@ async def _generate_report_bytes(
             )
         df = await get_dataset_table_dataframe(storage, table)
         mapping = get_effective_field_mapping(table, pack, df.columns)
-        kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+        window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+        kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
         if scheduled.report_type == "commercial_property_portfolio":
             return generate_commercial_property_report_pdf(
@@ -110,6 +111,7 @@ async def _generate_report_bytes(
                 df=df,
                 mapping=mapping,
                 kpi_results=kpi_results,
+                window_months=window_months,
             )
         if scheduled.report_type == "residential_property_portfolio":
             return generate_residential_property_report_pdf(
@@ -119,6 +121,7 @@ async def _generate_report_bytes(
                 df=df,
                 mapping=mapping,
                 kpi_results=kpi_results,
+                window_months=window_months,
             )
         if scheduled.report_type == "social_housing_asset":
             return generate_social_housing_report_pdf(
@@ -129,6 +132,7 @@ async def _generate_report_bytes(
                 mapping=mapping,
                 kpi_results=kpi_results,
                 compliance_caveat=pack.compliance_caveat,
+                window_months=window_months,
             )
         if scheduled.report_type == "residential_repairs_maintenance":
             return generate_residential_repairs_maintenance_report_pdf(
@@ -147,6 +151,7 @@ async def _generate_report_bytes(
                 df=df,
                 mapping=mapping,
                 compliance_caveat=pack.compliance_caveat,
+                window_months=window_months,
             )
         if scheduled.report_type == "business_performance":
             return generate_business_finance_report_pdf(

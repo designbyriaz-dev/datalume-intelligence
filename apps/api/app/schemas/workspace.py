@@ -17,3 +17,13 @@ class WorkspaceOut(BaseModel):
     industry: str
     owner_user_id: str | None
     organization_id: str | None
+    kpi_window_months: int | None
+
+
+class WorkspaceSettingsUpdate(BaseModel):
+    # None resets to the default (12 months, see
+    # app.services.industry_kpis.DEFAULT_KPI_WINDOW_MONTHS). Always
+    # required in the payload, not just-omittable, so a PATCH call always
+    # states its intent explicitly rather than relying on "field absent"
+    # to mean "leave unchanged" for a single-field resource.
+    kpi_window_months: int | None = Field(default=None, ge=1, le=60)

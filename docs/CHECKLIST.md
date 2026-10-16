@@ -443,10 +443,10 @@ could be written honestly rather than guessed.
   correct the automatic mapping before KPIs/reports are computed,
   extending Phase 2's schema-confirmation pattern — see "Post-Phase-7:
   industry field mapping confirmation" below.
-- ⬜ "Overdue inspection" (social housing) and "leases expiring within 12
-  months" (commercial property) both use a 12-month window as an
-  explicit, documented assumption — not a value the brief specified, and
-  not configurable per-organisation yet.
+- ✅ **"Overdue inspection" (social housing) and "leases expiring within 12
+  months" (commercial property) are now configurable per workspace** —
+  see "Post-Phase-7: configurable KPI date window" below. Still a
+  12-month default, not a value the brief specified, but no longer fixed.
 
 ## Phase 6 — Advanced Analytics
 
@@ -2153,6 +2153,87 @@ See the Phase 2 section above (now ✅) for the full description.
   `tests/test_datasets.py` — uses a >10,000-row generated CSV so the
   real `ignore_errors` coercion-failure path is actually exercised, not
   a small fixture Polars would just widen to text).
+
+## Post-Phase-7: configurable KPI date window
+
+Closes the Phase 5 gap on "overdue inspection" / "leases expiring"
+always using a fixed 12-month window. The real scope turned out to be
+6 independent hardcoded locations, not the 2 KPI calculators alone: the
+4 specialist PDF report generators (commercial property, residential
+property, both social housing reports) had each separately re-derived
+the identical `today.replace(year=today.year ± 1)` cutoff inline,
+contradicting `docs/ARCHITECTURE.md`'s claim that the PDF reports reuse
+the KPI engine's exact date logic.
+
+- ✅ **`Workspace.kpi_window_months`** (new nullable `Integer` column,
+  migration `25297cfd1b0e`): `NULL` means "use the 12-month default"
+  (`app/services/industry_kpis.py`'s `DEFAULT_KPI_WINDOW_MONTHS`). Lives
+  on `Workspace` rather than `Organization` since a personal
+  (user-owned) workspace has no organization row to hold it.
+- ✅ **`PATCH /workspaces/{id}/settings`**: sets or resets (via explicit
+  `null`) the window, validated to 1-60 months, gated behind
+  `require_workspace_write_access` (same bar as cleaning operations —
+  a Viewer/Auditor can't change it).
+- ✅ **`_add_months` helper** replaces the two calculators' and four
+  report generators' `date.replace(year=year ± 1)` arithmetic — besides
+  being parameterizable to N months instead of a fixed 12, this also
+  fixes a latent crash the old code had: `date.replace(year=...)` raises
+  `ValueError` on 29 Feb in a non-leap target year, which `_add_months`
+  instead clamps to 28 Feb (same clamping approach already used by
+  `scheduled_reports.compute_next_run`'s monthly cadence).
+  `window_months` is threaded through `compute_kpis` and all ~9 call
+  sites (the `/industry-kpis` and `/scenario` endpoints, dashboard KPI
+  widgets, scheduled reports, and all 6 on-demand specialist report
+  endpoints) as `workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS`.
+- ✅ **A real UI/PDF inconsistency caught by generating and reading an
+  actual report, not by inspection**: the `leases_expiring_12_months`
+  KPI's *name* is a fixed string ("Leases Expiring Within 12 Months")
+  set at pack-definition time — it doesn't know what window a given
+  workspace actually configured. With a 1-month window set, the
+  commercial property report's "Key metrics" table still read "Leases
+  Expiring Within 12 Months: 1" directly above a "Lease expiry schedule
+  (next 1 month)" section — numerically correct but visibly
+  self-contradictory. Fixed by re-deriving that one label dynamically
+  from `window_months_used` in both the frontend KPI panel
+  (`apps/web/src/app/dashboard/workspaces/[id]/page.tsx`) and the PDF's
+  Key Metrics table (`generate_commercial_property_report_pdf`) — the
+  `properties_overdue_inspection` KPI's name has no number baked in, so
+  it didn't need the same fix. Caught by actually calling the real
+  `/reports/commercial-property-portfolio` endpoint, downloading the
+  PDF, and reading its extracted text — not by just confirming a `200`
+  with a nonzero `Content-Length`.
+- ✅ **`_months_label` helper** (`app/services/reports.py`) fixes a
+  grammar bug the first pass of this feature introduced: naively
+  interpolating `window_months` into report section headers produced
+  "next 1 months" for a 1-month window. Every PDF section header
+  touched by this feature (`Lease expiry schedule`, `Tenancies ending`,
+  `Properties overdue inspection` ×2, plus their "no results" fallback
+  sentences) now goes through this helper instead.
+- ✅ **Frontend**: a workspace-page control ("Lease/inspection
+  date-window KPIs use N months. Change") next to the industry label,
+  shown only for the three industries whose KPIs/reports actually use
+  the window (`commercial_property`, `residential_property`,
+  `social_housing` — `business_finance` has no such KPI, so the control
+  would be a no-op there). The KPI results panel also states which
+  window was actually used (`window_months_used` on
+  `IndustryKPIResponse`), so a user re-reading an old result isn't
+  misled if the setting has since changed.
+- ✅ Automated backend tests: 288/288 passing (5 new, in
+  `tests/test_workspace_kpi_window.py`) — proves the setting actually
+  changes both calculators' real output, in opposite directions:
+  narrowing the window drops the leases-expiring count but raises the
+  overdue-inspection count, each against a date fixture with enough
+  margin (20/90-day and 14/40-day offsets) to be robust to whatever
+  calendar month the suite happens to run in. Plus settings-endpoint
+  tests for range validation (422 outside 1-60) and write-access
+  enforcement (403 for an outsider).
+- ✅ **Verified live against a real running server**: changed the
+  setting via the browser UI from 12→1 month, recomputed KPIs, watched
+  "Leases Expiring Within 12 Months: 2" become "Leases Expiring Within 1
+  Month: 1" — and separately generated the real PDF report via the API
+  and read its extracted text, confirming both the KPI-table label fix
+  and the grammar fix actually render correctly, not just that the
+  underlying numbers were right.
 
 ## Known limitations in what's built
 

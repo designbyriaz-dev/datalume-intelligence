@@ -15,7 +15,7 @@ from app.models.user import User
 from app.schemas.report import ReportOut
 from app.services.authz import require_workspace_access
 from app.services.datasets import get_dataset_table_dataframe
-from app.services.industry_kpis import compute_kpis
+from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, compute_kpis
 from app.services.industry_matching import get_effective_field_mapping
 from app.services.reports import (
     generate_business_finance_report_pdf,
@@ -102,7 +102,8 @@ async def generate_commercial_property_portfolio_report(
 
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
-    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     pdf_bytes = generate_commercial_property_report_pdf(
         dataset_name=dataset.name,
@@ -111,6 +112,7 @@ async def generate_commercial_property_portfolio_report(
         df=df,
         mapping=mapping,
         kpi_results=kpi_results,
+        window_months=window_months,
     )
 
     report_id = str(uuid.uuid4())
@@ -164,7 +166,8 @@ async def generate_residential_property_portfolio_report(
 
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
-    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     pdf_bytes = generate_residential_property_report_pdf(
         dataset_name=dataset.name,
@@ -173,6 +176,7 @@ async def generate_residential_property_portfolio_report(
         df=df,
         mapping=mapping,
         kpi_results=kpi_results,
+        window_months=window_months,
     )
 
     report_id = str(uuid.uuid4())
@@ -226,7 +230,8 @@ async def generate_social_housing_asset_report(
 
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
-    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     pdf_bytes = generate_social_housing_report_pdf(
         dataset_name=dataset.name,
@@ -236,6 +241,7 @@ async def generate_social_housing_asset_report(
         mapping=mapping,
         kpi_results=kpi_results,
         compliance_caveat=pack.compliance_caveat,
+        window_months=window_months,
     )
 
     report_id = str(uuid.uuid4())
@@ -289,7 +295,8 @@ async def generate_business_performance_report(
 
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
-    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     pdf_bytes = generate_business_finance_report_pdf(
         dataset_name=dataset.name,
@@ -351,6 +358,7 @@ async def generate_social_housing_compliance_exceptions_report(
 
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
 
     pdf_bytes = generate_social_housing_compliance_exceptions_report_pdf(
         dataset_name=dataset.name,
@@ -359,6 +367,7 @@ async def generate_social_housing_compliance_exceptions_report(
         df=df,
         mapping=mapping,
         compliance_caveat=pack.compliance_caveat,
+        window_months=window_months,
     )
 
     report_id = str(uuid.uuid4())
@@ -412,7 +421,8 @@ async def generate_residential_repairs_maintenance_report(
 
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
-    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     pdf_bytes = generate_residential_repairs_maintenance_report_pdf(
         dataset_name=dataset.name,

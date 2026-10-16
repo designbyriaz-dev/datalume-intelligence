@@ -20,7 +20,7 @@ from app.schemas.scenario import KPIDeltaOut, ScenarioRequest, ScenarioResponse
 from app.services import billing
 from app.services.authz import require_workspace_access, require_workspace_write_access
 from app.services.datasets import get_dataset_table_dataframe
-from app.services.industry_kpis import compute_kpis
+from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, compute_kpis
 from app.services.industry_matching import get_effective_field_mapping, missing_required_fields
 from app.services.scenario import ScenarioAdjustment, ScenarioError, apply_adjustments
 from app.services.storage import ObjectStorage
@@ -193,7 +193,8 @@ async def compute_industry_kpis(
     mapping = get_effective_field_mapping(table, pack, df.columns)
     missing = missing_required_fields(pack, mapping)
 
-    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     subscription = await billing.get_subscription_for_workspace(db, workspace)
     try:
@@ -208,12 +209,13 @@ async def compute_industry_kpis(
         "missing_required_fields": missing,
         "kpis": [asdict(r) for r in kpi_results],
         "compliance_caveat": pack.compliance_caveat,
+        "window_months_used": window_months,
     }
 
     run = AnalysisRun(
         dataset_table_id=table.id,
         operation_type=f"industry_kpis:{pack.industry_id}",
-        parameters={"industry_id": pack.industry_id},
+        parameters={"industry_id": pack.industry_id, "window_months": window_months},
         result=result_payload,
         created_by_user_id=current_user.id,
     )
@@ -229,6 +231,7 @@ async def compute_industry_kpis(
         missing_required_fields=missing,
         kpis=[asdict(r) for r in kpi_results],
         compliance_caveat=pack.compliance_caveat,
+        window_months_used=window_months,
     )
 
 
@@ -282,7 +285,8 @@ async def run_scenario(
     df = await get_dataset_table_dataframe(storage, table)
     mapping = get_effective_field_mapping(table, pack, df.columns)
 
-    baseline_kpis = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    baseline_kpis = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     adjustments = [ScenarioAdjustment(a.column, a.adjustment_type, a.value) for a in payload.adjustments]
     try:
@@ -290,7 +294,7 @@ async def run_scenario(
     except ScenarioError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    scenario_kpis = compute_kpis(adjusted_df, pack, mapping, as_of=dt.date.today())
+    scenario_kpis = compute_kpis(adjusted_df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
     # Quota is only consumed once the scenario actually computed
     # successfully — same "don't charge for a failed request" pattern as

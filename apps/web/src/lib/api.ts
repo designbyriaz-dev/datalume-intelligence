@@ -88,6 +88,7 @@ export interface Workspace {
   industry: string;
   owner_user_id: string | null;
   organization_id: string | null;
+  kpi_window_months: number | null;
 }
 
 export interface ColumnProfile {
@@ -260,6 +261,7 @@ export interface IndustryKPIResponse {
   missing_required_fields: string[];
   kpis: KPIResult[];
   compliance_caveat: string | null;
+  window_months_used: number;
 }
 
 export interface FieldMappingEntry {
@@ -544,6 +546,13 @@ export const api = {
 
   getWorkspace: (token: string, workspaceId: string) =>
     request<Workspace>(`/api/v1/workspaces/${workspaceId}`, {}, token),
+
+  updateWorkspaceSettings: (token: string, workspaceId: string, kpiWindowMonths: number | null) =>
+    request<Workspace>(
+      `/api/v1/workspaces/${workspaceId}/settings`,
+      { method: "PATCH", body: JSON.stringify({ kpi_window_months: kpiWindowMonths }) },
+      token
+    ),
 
   listDatasets: (token: string, workspaceId: string) =>
     request<Dataset[]>(`/api/v1/workspaces/${workspaceId}/datasets`, {}, token),

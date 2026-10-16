@@ -116,7 +116,8 @@ COMMERCIAL_PROPERTY = IndustryPack(
         KPIDefinition(
             "leases_expiring_12_months",
             "Leases Expiring Within 12 Months",
-            "Count of leases with an expiry date within 12 months of the latest date in the data",
+            "Count of leases with an expiry date within the next 12 months by default — configurable "
+            "per workspace (Workspace.kpi_window_months) — of the latest date in the data",
             "count",
             ("lease_end_date",),
         ),
@@ -267,9 +268,9 @@ SOCIAL_HOUSING = IndustryPack(
     report_templates=("social_housing_asset", "social_housing_compliance_exceptions"),
     compliance_caveat=(
         "These figures are calculated from the data you uploaded and do NOT constitute legal compliance "
-        "certification. 'Overdue inspection' uses a 12-month assumption that may not match your "
-        "regulatory or contractual inspection cycle — verify against your actual compliance framework "
-        "before acting on this data."
+        "certification. 'Overdue inspection' uses a 12-month assumption by default (configurable per "
+        "workspace) that may not match your regulatory or contractual inspection cycle — verify against "
+        "your actual compliance framework before acting on this data."
     ),
 )
 

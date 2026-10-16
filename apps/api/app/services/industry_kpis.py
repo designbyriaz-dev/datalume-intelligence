@@ -8,6 +8,7 @@ guessing (see especially the social housing "overdue inspection" KPI).
 
 from __future__ import annotations
 
+import calendar
 import datetime as dt
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,23 @@ from app.services.analytics import _parse_date_cell
 
 _OCCUPIED_MARKERS = ("occ", "let", "tenanted")
 _VACANT_MARKERS = ("vac", "void", "empty")
+
+# Default for the two date-window KPIs below when a workspace hasn't
+# configured its own (Workspace.kpi_window_months is None). Not a value
+# the brief specified — see docs/CHECKLIST.md's Phase 5 section.
+DEFAULT_KPI_WINDOW_MONTHS = 12
+
+
+def _add_months(d: dt.date, months: int) -> dt.date:
+    """Add a (possibly negative) number of months to a date, clamping the
+    day to the target month's length (e.g. 2024-02-29 + 12 months ->
+    2025-02-28, not a ValueError) — same clamping approach as
+    scheduled_reports.compute_next_run's monthly cadence."""
+    month_index = d.month - 1 + months
+    year = d.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return d.replace(year=year, month=month, day=day)
 
 
 class KPIError(Exception):
@@ -113,12 +131,14 @@ def _calc_total_maintenance_cost(df, mapping, **_kwargs) -> float:
     return round(float(_resolve_numeric_series(df, mapping, "maintenance_cost").sum()), 2)
 
 
-def _calc_leases_expiring_12_months(df, mapping, as_of: dt.date | None = None, **_kwargs) -> int:
+def _calc_leases_expiring_12_months(
+    df, mapping, as_of: dt.date | None = None, window_months: int = DEFAULT_KPI_WINDOW_MONTHS, **_kwargs
+) -> int:
     col = mapping.get("lease_end_date")
     if col is None:
         raise KPIError("Required field 'lease_end_date' is not mapped to a column.")
     reference = as_of or dt.date.today()
-    cutoff = reference.replace(year=reference.year + 1)
+    cutoff = _add_months(reference, window_months)
     count = 0
     for raw in df[col].to_list():
         if raw is None:
@@ -149,12 +169,14 @@ def _calc_total_properties(df, mapping, **_kwargs) -> int:
     return int(df[col].drop_nulls().len())
 
 
-def _calc_properties_overdue_inspection(df, mapping, as_of: dt.date | None = None, **_kwargs) -> int:
+def _calc_properties_overdue_inspection(
+    df, mapping, as_of: dt.date | None = None, window_months: int = DEFAULT_KPI_WINDOW_MONTHS, **_kwargs
+) -> int:
     col = mapping.get("last_inspection_date")
     if col is None:
         raise KPIError("Required field 'last_inspection_date' is not mapped to a column.")
     reference = as_of or dt.date.today()
-    cutoff = reference.replace(year=reference.year - 1)
+    cutoff = _add_months(reference, -window_months)
     count = 0
     for raw in df[col].to_list():
         if raw is None:
@@ -250,7 +272,11 @@ _CALCULATORS = {
 
 
 def compute_kpis(
-    df: pl.DataFrame, pack: IndustryPack, mapping: dict[str, str | None], as_of: dt.date | None = None
+    df: pl.DataFrame,
+    pack: IndustryPack,
+    mapping: dict[str, str | None],
+    as_of: dt.date | None = None,
+    window_months: int = DEFAULT_KPI_WINDOW_MONTHS,
 ) -> list[KPIResult]:
     results: list[KPIResult] = []
     for kpi in pack.kpis:
@@ -274,7 +300,7 @@ def compute_kpis(
             )
             continue
         try:
-            value = calculator(df, mapping, as_of=as_of)
+            value = calculator(df, mapping, as_of=as_of, window_months=window_months)
             results.append(KPIResult(kpi.kpi_id, kpi.name, kpi.format, value, _format(value, kpi.format)))
         except KPIError as exc:
             results.append(KPIResult(kpi.kpi_id, kpi.name, kpi.format, None, "—", error=str(exc)))

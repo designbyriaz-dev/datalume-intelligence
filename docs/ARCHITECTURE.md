@@ -952,13 +952,17 @@ fixes, not just confirmation.
   first of the five reports with no KPI table: an exceptions audit's
   job is the exception list, not a summary metric.
 - **Reused the KPI engine's exact overdue/void logic rather than
-  redefining either.** `_VACANT_MARKERS` and the 12-month
-  overdue-inspection cutoff already exist in
-  `app/services/industry_kpis.py`, tested and already driving both the
-  `/industry-kpis` endpoint and the existing Asset Report. Importing
-  that constant and mirroring that cutoff exactly (rather than writing
-  "close enough" logic a second time) is the same discipline every
-  other report in this file already follows for its KPI table — just
+  redefining either.** `_VACANT_MARKERS` and the overdue-inspection
+  cutoff helper (`_add_months`, plus the configurable `window_months` —
+  see "Post-Phase-7: configurable KPI date window" in
+  docs/CHECKLIST.md) live in `app/services/industry_kpis.py`, tested and
+  already driving both the `/industry-kpis` endpoint and the existing
+  Asset Report. Importing that helper and mirroring that cutoff exactly
+  (rather than writing "close enough" logic a second time — this report
+  originally did re-derive it inline, a gap closed in the
+  "configurable KPI date window" round above) is the same discipline
+  every other report in this file already follows for its KPI table —
+  just
   applied to exception-detection logic instead.
 - **The frontend's per-industry report map hit its limit at exactly the
   moment it needed to generalize.** The fourth report's lookup map

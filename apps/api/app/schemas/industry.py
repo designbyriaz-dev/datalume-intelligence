@@ -44,6 +44,10 @@ class IndustryKPIResponse(BaseModel):
     missing_required_fields: list[str]
     kpis: list[KPIResultOut]
     compliance_caveat: str | None
+    window_months_used: int = Field(
+        description="The lookback/lookahead window the date-based KPIs (leases expiring, overdue "
+        "inspection) actually used — the workspace's configured value, or the 12-month default."
+    )
 
 
 class FieldMappingEntryOut(BaseModel):

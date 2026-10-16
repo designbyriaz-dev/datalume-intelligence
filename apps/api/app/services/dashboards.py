@@ -17,7 +17,7 @@ from app.core.industry_packs import get_industry_pack
 from app.models.dataset import DatasetTable
 from app.models.workspace import Workspace
 from app.services.analytics import AnalyticsError
-from app.services.industry_kpis import compute_kpis
+from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, compute_kpis
 from app.services.industry_matching import get_effective_field_mapping
 from app.services.tools import TOOLS
 
@@ -39,7 +39,8 @@ def compute_widget_value(
             raise WidgetComputeError(f"Unknown kpi_id '{kpi_id}' for pack '{pack.industry_id}'.")
 
         mapping = get_effective_field_mapping(table, pack, df.columns)
-        results = compute_kpis(df, pack, mapping, as_of=dt.date.today())
+        window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+        results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
         result = next(r for r in results if r.kpi_id == kpi_id)
         return {
             "kind": "kpi",

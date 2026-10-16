@@ -23,7 +23,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.models.dataset import DatasetTable
 from app.services.analytics import AnalyticsError, _parse_date_cell, group_aggregate, time_trend
-from app.services.industry_kpis import _VACANT_MARKERS, KPIResult
+from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, _VACANT_MARKERS, _add_months, KPIResult
 
 _POOR_EPC_RATINGS = {"E", "F", "G"}
 
@@ -34,6 +34,10 @@ _H2_STYLE = ParagraphStyle("DLH2", parent=_STYLES["Heading2"], spaceBefore=16, s
 _BODY_STYLE = _STYLES["BodyText"]
 
 _SEVERITY_COLOR = {"warning": colors.HexColor("#b45309"), "info": colors.HexColor("#475569")}
+
+
+def _months_label(n: int) -> str:
+    return f"{n} month" if n == 1 else f"{n} months"
 
 
 def _quality_badge_color(score: float) -> colors.Color:
@@ -203,6 +207,7 @@ def generate_commercial_property_report_pdf(
     df: pl.DataFrame,
     mapping: dict[str, str | None],
     kpi_results: list[KPIResult],
+    window_months: int = DEFAULT_KPI_WINDOW_MONTHS,
 ) -> bytes:
     """The one specialist report template actually implemented in Phase 5
     (see docs/CHECKLIST.md for the other 11 the brief describes). Built
@@ -227,7 +232,16 @@ def generate_commercial_property_report_pdf(
     story.append(Paragraph("Key metrics", _H2_STYLE))
     kpi_rows = [["Metric", "Value"]]
     for kpi in kpi_results:
-        kpi_rows.append([kpi.name, kpi.formatted if kpi.error is None else "Not available"])
+        # The KPI's stable name always says "12 Months" (see
+        # app/core/industry_packs.py) since it's a fixed identifier, not
+        # workspace-aware — rename it here so it never contradicts the
+        # window actually used, same fix as the frontend KPI panel.
+        label = (
+            f"Leases Expiring Within {_months_label(window_months).title()}"
+            if kpi.kpi_id == "leases_expiring_12_months"
+            else kpi.name
+        )
+        kpi_rows.append([label, kpi.formatted if kpi.error is None else "Not available"])
     kpi_table = Table(kpi_rows, colWidths=[9 * cm, 6 * cm])
     kpi_table.setStyle(
         TableStyle(
@@ -266,7 +280,7 @@ def generate_commercial_property_report_pdf(
     lease_end_col = mapping.get("lease_end_date")
     if tenant_col and lease_end_col and rent_col:
         today = dt.date.today()
-        cutoff = today.replace(year=today.year + 1)
+        cutoff = _add_months(today, window_months)
         expiring = []
         for row in df.select([tenant_col, rent_col, lease_end_col]).to_dicts():
             raw_date = row[lease_end_col]
@@ -275,7 +289,7 @@ def generate_commercial_property_report_pdf(
                 expiring.append((parsed, row[tenant_col], row[rent_col]))
         expiring.sort(key=lambda r: r[0])
 
-        story.append(Paragraph("Lease expiry schedule (next 12 months)", _H2_STYLE))
+        story.append(Paragraph(f"Lease expiry schedule (next {_months_label(window_months)})", _H2_STYLE))
         if expiring:
             rows = [["Lease End Date", "Tenant", "Rent"]] + [
                 [d.isoformat(), tenant, f"£{rent:,.2f}"] for d, tenant, rent in expiring
@@ -293,7 +307,7 @@ def generate_commercial_property_report_pdf(
             )
             story.append(lease_table)
         else:
-            story.append(Paragraph("No leases expire within the next 12 months.", _BODY_STYLE))
+            story.append(Paragraph(f"No leases expire within the next {_months_label(window_months)}.", _BODY_STYLE))
 
     story.append(Spacer(1, 20))
     story.append(
@@ -317,6 +331,7 @@ def generate_social_housing_compliance_exceptions_report_pdf(
     df: pl.DataFrame,
     mapping: dict[str, str | None],
     compliance_caveat: str | None,
+    window_months: int = DEFAULT_KPI_WINDOW_MONTHS,
 ) -> bytes:
     """The fifth specialist report template, and the first to be a
     second report on an existing pack rather than a first report on a
@@ -376,7 +391,7 @@ def generate_social_housing_compliance_exceptions_report_pdf(
     investment_col = mapping.get("planned_investment_amount")
 
     today = dt.date.today()
-    cutoff = today.replace(year=today.year - 1)
+    cutoff = _add_months(today, -window_months)
 
     overdue: list[tuple[dt.date, str]] = []
     no_inspection_date: list[str] = []
@@ -416,14 +431,14 @@ def generate_social_housing_compliance_exceptions_report_pdf(
     story.append(Paragraph("Exception summary", _H2_STYLE))
     summary_rows = [
         ["Exception", "Count"],
-        ["Overdue inspection (>12 months)", str(len(overdue))],
+        [f"Overdue inspection (>{_months_label(window_months)})", str(len(overdue))],
         ["No inspection date recorded", str(len(no_inspection_date))],
         ["Poor EPC rating (E, F or G)", str(len(poor_epc))],
         ["Void with no planned investment", str(len(void_no_investment))],
     ]
     story.append(_simple_table(summary_rows, [11 * cm, 4 * cm]))
 
-    story.append(Paragraph("Properties overdue inspection (>12 months)", _H2_STYLE))
+    story.append(Paragraph(f"Properties overdue inspection (>{_months_label(window_months)})", _H2_STYLE))
     if overdue:
         rows = [["Last Inspection", "Property"]] + [[d.isoformat(), p] for d, p in overdue]
         story.append(_simple_table(rows, [4 * cm, 11 * cm]))
@@ -474,6 +489,7 @@ def generate_residential_property_report_pdf(
     df: pl.DataFrame,
     mapping: dict[str, str | None],
     kpi_results: list[KPIResult],
+    window_months: int = DEFAULT_KPI_WINDOW_MONTHS,
 ) -> bytes:
     """The second specialist report template (the first, commercial
     property, was built in Phase 5 — see docs/CHECKLIST.md for the
@@ -511,7 +527,7 @@ def generate_residential_property_report_pdf(
     unit_col = mapping.get("unit")
     if tenant_col and tenancy_end_col and rent_col:
         today = dt.date.today()
-        cutoff = today.replace(year=today.year + 1)
+        cutoff = _add_months(today, window_months)
         expiring = []
         for row in df.select([tenant_col, rent_col, tenancy_end_col]).to_dicts():
             raw_date = row[tenancy_end_col]
@@ -520,14 +536,14 @@ def generate_residential_property_report_pdf(
                 expiring.append((parsed, row[tenant_col], row[rent_col]))
         expiring.sort(key=lambda r: r[0])
 
-        story.append(Paragraph("Tenancies ending within 12 months", _H2_STYLE))
+        story.append(Paragraph(f"Tenancies ending within {_months_label(window_months)}", _H2_STYLE))
         if expiring:
             rows = [["Tenancy End Date", "Tenant", "Rent"]] + [
                 [d.isoformat(), tenant, f"£{rent:,.2f}"] for d, tenant, rent in expiring
             ]
             story.append(_simple_table(rows, [4 * cm, 7 * cm, 4 * cm]))
         else:
-            story.append(Paragraph("No tenancies end within the next 12 months.", _BODY_STYLE))
+            story.append(Paragraph(f"No tenancies end within the next {_months_label(window_months)}.", _BODY_STYLE))
 
     arrears_col = mapping.get("arrears_amount")
     if arrears_col and (unit_col or tenant_col):
@@ -572,6 +588,7 @@ def generate_social_housing_report_pdf(
     mapping: dict[str, str | None],
     kpi_results: list[KPIResult],
     compliance_caveat: str | None,
+    window_months: int = DEFAULT_KPI_WINDOW_MONTHS,
 ) -> bytes:
     """The third specialist report template. Built from the exact same
     KPI engine as /industry-kpis for the social_housing pack. Unlike
@@ -619,7 +636,7 @@ def generate_social_housing_report_pdf(
     inspection_col = mapping.get("last_inspection_date")
     if property_col and inspection_col:
         today = dt.date.today()
-        cutoff = today.replace(year=today.year - 1)
+        cutoff = _add_months(today, -window_months)
         overdue = []
         for row in df.select([property_col, inspection_col]).to_dicts():
             raw_date = row[inspection_col]
@@ -628,7 +645,7 @@ def generate_social_housing_report_pdf(
                 overdue.append((parsed, row[property_col]))
         overdue.sort(key=lambda r: r[0])  # most overdue (oldest inspection) first
 
-        story.append(Paragraph("Properties overdue inspection (>12 months)", _H2_STYLE))
+        story.append(Paragraph(f"Properties overdue inspection (>{_months_label(window_months)})", _H2_STYLE))
         if overdue:
             rows = [["Last Inspection", "Property"]] + [[d.isoformat(), str(p)] for d, p in overdue]
             story.append(_simple_table(rows, [4 * cm, 11 * cm]))

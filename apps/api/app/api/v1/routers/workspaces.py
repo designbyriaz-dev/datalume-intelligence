@@ -7,8 +7,8 @@ from app.db.session import get_db
 from app.models.membership import Membership
 from app.models.user import User
 from app.models.workspace import Workspace
-from app.schemas.workspace import WorkspaceCreate, WorkspaceOut
-from app.services.authz import require_membership, require_workspace_access
+from app.schemas.workspace import WorkspaceCreate, WorkspaceOut, WorkspaceSettingsUpdate
+from app.services.authz import require_membership, require_workspace_access, require_workspace_write_access
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
@@ -69,4 +69,25 @@ async def get_workspace(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
 
     await require_workspace_access(db, current_user.id, workspace)
+    return workspace
+
+
+@router.patch("/{workspace_id}/settings", response_model=WorkspaceOut)
+async def update_workspace_settings(
+    workspace_id: str,
+    payload: WorkspaceSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Workspace:
+    workspace = (
+        await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    ).scalar_one_or_none()
+    if workspace is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+
+    await require_workspace_write_access(db, current_user.id, workspace)
+
+    workspace.kpi_window_months = payload.kpi_window_months
+    await db.commit()
+    await db.refresh(workspace)
     return workspace

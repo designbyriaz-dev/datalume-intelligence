@@ -24,6 +24,94 @@ import {
 
 const INDUSTRY_PACK_IDS = new Set(["commercial_property", "residential_property", "social_housing", "business_finance"]);
 
+// Industries whose KPIs/reports actually use the configurable date window
+// (leases expiring, overdue inspection, tenancies ending) — business_finance
+// has no such KPI, so the setting would be a no-op there.
+const INDUSTRIES_WITH_KPI_WINDOW = new Set(["commercial_property", "residential_property", "social_housing"]);
+const DEFAULT_KPI_WINDOW_MONTHS = 12;
+
+function KpiWindowSetting({
+  workspace,
+  token,
+  onChanged,
+}: {
+  workspace: Workspace;
+  token: string;
+  onChanged: (workspace: Workspace) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(workspace.kpi_window_months ?? DEFAULT_KPI_WINDOW_MONTHS));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!INDUSTRIES_WITH_KPI_WINDOW.has(workspace.industry)) return null;
+
+  const effective = workspace.kpi_window_months ?? DEFAULT_KPI_WINDOW_MONTHS;
+
+  const onSave = async () => {
+    const months = parseInt(value, 10);
+    if (!Number.isFinite(months) || months < 1 || months > 60) {
+      setError("Enter a whole number of months between 1 and 60.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await api.updateWorkspaceSettings(
+        token,
+        workspace.id,
+        months === DEFAULT_KPI_WINDOW_MONTHS ? null : months
+      );
+      onChanged(updated);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save setting.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <p className="mt-1 text-xs text-slate-500">
+        Lease/inspection date-window KPIs use {effective} month{effective === 1 ? "" : "s"}
+        {workspace.kpi_window_months == null ? " (default)" : ""}.{" "}
+        <button onClick={() => setEditing(true)} className="text-brand-500 hover:underline">
+          Change
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-2 text-xs">
+      <label htmlFor="kpi-window-months" className="text-slate-500">
+        Months:
+      </label>
+      <input
+        id="kpi-window-months"
+        type="number"
+        min={1}
+        max={60}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-16 rounded-md border border-slate-300 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-900"
+      />
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="rounded-md border border-slate-300 px-2 py-0.5 font-medium hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+      >
+        {saving ? "Saving…" : "Save"}
+      </button>
+      <button onClick={() => setEditing(false)} disabled={saving} className="text-slate-500 hover:underline">
+        Cancel
+      </button>
+      {error && <span className="text-red-600">{error}</span>}
+    </div>
+  );
+}
+
 function QualityBadge({ score }: { score: number }) {
   const color =
     score >= 85
@@ -396,10 +484,19 @@ function IndustryKpiPanel({ tableId, token, industry }: { tableId: string; token
               {result.missing_required_fields.join(", ")}.
             </p>
           )}
+          {INDUSTRIES_WITH_KPI_WINDOW.has(industry) && (
+            <p className="mb-3 text-xs text-slate-500">
+              Date-window KPIs used a {result.window_months_used}-month window.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {result.kpis.map((kpi) => (
               <div key={kpi.kpi_id} className="rounded-md bg-slate-50 p-2 dark:bg-slate-900">
-                <div className="text-xs text-slate-500">{kpi.name}</div>
+                <div className="text-xs text-slate-500">
+                  {kpi.kpi_id === "leases_expiring_12_months"
+                    ? `Leases Expiring Within ${result.window_months_used} Month${result.window_months_used === 1 ? "" : "s"}`
+                    : kpi.name}
+                </div>
                 <div className="text-sm font-medium">
                   {kpi.error ? <span className="text-slate-400">Not available</span> : kpi.formatted}
                 </div>
@@ -1866,7 +1963,10 @@ export default function WorkspaceDetailPage() {
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">{workspace?.name ?? "Workspace"}</h1>
         {workspace && (
-          <p className="mt-1 text-sm text-slate-500">{workspace.industry.replace(/_/g, " ")}</p>
+          <>
+            <p className="mt-1 text-sm text-slate-500">{workspace.industry.replace(/_/g, " ")}</p>
+            {token && <KpiWindowSetting workspace={workspace} token={token} onChanged={setWorkspace} />}
+          </>
         )}
 
         <form onSubmit={onUpload} className="mt-8 space-y-3 rounded-lg border border-slate-200 p-5 dark:border-slate-800">
