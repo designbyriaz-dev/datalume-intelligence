@@ -246,3 +246,33 @@ async def test_outsider_cannot_ask_or_read_conversation(client: AsyncClient) -> 
         f"/api/v1/datasets/{dataset_id}/conversations", headers=_auth(outsider_token)
     )
     assert denied_list.status_code == 403
+
+
+async def test_outsider_cannot_read_conversation_detail(client: AsyncClient) -> None:
+    owner_token = await _register_and_login(client, "owner5@example.com")
+    outsider_token = await _register_and_login(client, "outsider5@example.com")
+    _dataset_id, table_id = await _setup_dataset_and_table(client, owner_token)
+
+    fake_client = _ScriptedClient(
+        [LLMResponse(text="The average rent is 1383.33.", tool_uses=[], stop_reason="end_turn")]
+    )
+    app.dependency_overrides[get_llm_client_dep] = lambda: fake_client
+    try:
+        resp = await client.post(
+            f"/api/v1/dataset-tables/{table_id}/ask",
+            json={"question": "What's the average rent?"},
+            headers=_auth(owner_token),
+        )
+        assert resp.status_code == 200, resp.text
+        conversation_id = resp.json()["conversation_id"]
+    finally:
+        app.dependency_overrides.pop(get_llm_client_dep, None)
+
+    # The detail endpoint (unlike the list endpoint above) is keyed purely
+    # by conversation_id with no dataset_id in the URL to pre-check — it
+    # must still correctly reject an outsider rather than leaking the
+    # conversation's contents.
+    denied_detail = await client.get(
+        f"/api/v1/ai-conversations/{conversation_id}", headers=_auth(outsider_token)
+    )
+    assert denied_detail.status_code == 403

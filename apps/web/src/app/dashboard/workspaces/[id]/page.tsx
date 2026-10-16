@@ -7,7 +7,7 @@ import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
 import {
   api,
-  type AskResponse,
+  type AIConversation,
   type ColumnProfile,
   type Dataset,
   type DatasetDetail,
@@ -204,12 +204,26 @@ function DashboardGenerateButton({
   );
 }
 
-function AskAnalystBox({ tableId, token }: { tableId: string; token: string }) {
+function AskAnalystBox({ tableId, datasetId, token }: { tableId: string; datasetId: string; token: string }) {
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
-  const [response, setResponse] = useState<AskResponse | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversation, setConversation] = useState<AIConversation | null>(null);
+
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<AIConversation[] | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const loadConversation = async (id: string) => {
+    try {
+      setConversation(await api.getConversation(token, id));
+    } catch {
+      // leave the current transcript as-is on a transient fetch failure
+    }
+  };
 
   const onAsk = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,11 +231,15 @@ function AskAnalystBox({ tableId, token }: { tableId: string; token: string }) {
     setAsking(true);
     setError(null);
     setNotConfigured(false);
-    setResponse(null);
+    const askedQuestion = question;
+    setQuestion("");
     try {
-      const result = await api.askQuestion(token, tableId, question);
-      setResponse(result);
+      const result = await api.askQuestion(token, tableId, askedQuestion, conversationId ?? undefined);
+      setConversationId(result.conversation_id);
+      await loadConversation(result.conversation_id);
+      setHistory(null); // stale now — a new turn was added, or a new conversation started
     } catch (err) {
+      setQuestion(askedQuestion); // restore so the user doesn't lose their question
       if (err instanceof ApiError && err.status === 503) {
         setNotConfigured(true);
       } else {
@@ -232,9 +250,92 @@ function AskAnalystBox({ tableId, token }: { tableId: string; token: string }) {
     }
   };
 
+  const onNewConversation = () => {
+    setConversationId(null);
+    setConversation(null);
+    setError(null);
+    setNotConfigured(false);
+  };
+
+  const onToggleHistory = async () => {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (next && history === null) {
+      try {
+        setHistory(await api.listConversations(token, datasetId));
+      } catch (err) {
+        setHistoryError(err instanceof ApiError ? err.message : "Could not load conversation history.");
+        setHistory([]);
+      }
+    }
+  };
+
+  const onSelectConversation = async (id: string) => {
+    setConversationId(id);
+    setShowHistory(false);
+    setError(null);
+    await loadConversation(id);
+  };
+
   return (
     <div className="mt-3 rounded-md border border-dashed border-slate-300 p-3 dark:border-slate-700">
-      <form onSubmit={onAsk} className="flex gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-500">Ask the AI analyst</span>
+        <div className="flex gap-3 text-xs">
+          {conversation && (
+            <button type="button" onClick={onNewConversation} className="text-brand-500 hover:underline">
+              New conversation
+            </button>
+          )}
+          <button type="button" onClick={onToggleHistory} className="text-brand-500 hover:underline">
+            {showHistory ? "Hide history" : "History"}
+          </button>
+        </div>
+      </div>
+
+      {showHistory && (
+        <div className="mt-2 rounded-md bg-slate-50 p-2 dark:bg-slate-900">
+          {historyError ? (
+            <p className="text-xs text-slate-500">{historyError}</p>
+          ) : history === null ? (
+            <p className="text-xs text-slate-500">Loading…</p>
+          ) : history.length === 0 ? (
+            <p className="text-xs text-slate-500">No past conversations yet.</p>
+          ) : (
+            <ul className="space-y-1">
+              {history.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectConversation(c.id)}
+                    className="text-left text-xs text-brand-500 hover:underline"
+                  >
+                    {c.title || "Untitled"} · {new Date(c.created_at).toLocaleString()}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {conversation && conversation.messages.length > 0 && (
+        <div className="mt-2 max-h-80 space-y-2 overflow-y-auto">
+          {conversation.messages.map((m) => (
+            <div key={m.id} className="text-xs">
+              <span className="font-medium text-slate-500">{m.role === "user" ? "You" : "Analyst"}:</span>{" "}
+              <span>{m.content}</span>
+              {m.tool_calls && m.tool_calls.length > 0 && (
+                <div className="mt-0.5 text-slate-400">
+                  Backed by: {m.tool_calls.map((tc) => tc.name).join(", ")}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <form onSubmit={onAsk} className="mt-2 flex gap-2">
         <input
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
@@ -256,16 +357,6 @@ function AskAnalystBox({ tableId, token }: { tableId: string; token: string }) {
         </p>
       )}
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-      {response && (
-        <div className="mt-2 text-xs">
-          <p>{response.answer}</p>
-          {response.tool_calls.length > 0 && (
-            <p className="mt-1 text-slate-500">
-              Backed by: {response.tool_calls.map((tc) => tc.name).join(", ")}
-            </p>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -1996,7 +2087,7 @@ function DatasetCard({
               industry={industry}
               columns={table.profile.columns}
             />
-            <AskAnalystBox tableId={table.id} token={token} />
+            <AskAnalystBox tableId={table.id} datasetId={dataset.id} token={token} />
             <ScheduledReportsPanel
               tableId={table.id}
               workspaceId={workspaceId}

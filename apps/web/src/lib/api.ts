@@ -245,6 +245,24 @@ export interface AskResponse {
   hit_iteration_limit: boolean;
 }
 
+export interface AIMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  tool_calls: ToolCall[] | null;
+  created_at: string;
+}
+
+export interface AIConversation {
+  id: string;
+  workspace_id: string;
+  dataset_id: string;
+  title: string | null;
+  created_by_user_id: string;
+  created_at: string;
+  messages: AIMessage[];
+}
+
 export interface Plan {
   plan_id: string;
   name: string;
@@ -787,6 +805,12 @@ export const api = {
       { method: "POST", body: JSON.stringify({ question, conversation_id: conversationId ?? null }) },
       token
     ),
+
+  listConversations: (token: string, datasetId: string) =>
+    request<AIConversation[]>(`/api/v1/datasets/${datasetId}/conversations`, {}, token),
+
+  getConversation: (token: string, conversationId: string) =>
+    request<AIConversation>(`/api/v1/ai-conversations/${conversationId}`, {}, token),
 
   listPlans: () => request<Plan[]>("/api/v1/billing/plans", {}),
 

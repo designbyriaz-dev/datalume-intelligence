@@ -2516,10 +2516,12 @@ closed in earlier rounds still. (The same audit also turned up
 `/ai-conversations/{id}`, `/datasets/{id}/conversations`, and
 `/users/me/audit-log` with no frontend trace either — flagged, not
 built here; each is a smaller, more self-contained addition than this
-one, worth a future round. `/users/me/audit-log` was picked up in the
-very next round — see "Post-Phase-7: personal activity log UI" below —
-leaving the two AI-conversation-history endpoints as the remaining
-flagged gap.)
+one, worth a future round. `/users/me/audit-log` was picked up the
+round after — see "Post-Phase-7: personal activity log UI" below. The
+two AI-conversation-history endpoints were picked up as the first item
+of Phase B of a session-organized phased plan — see "Post-Phase-7: AI
+analyst conversation history UI" below. Every gap this particular
+audit turned up is now closed.)
 
 - ✅ **`UserOut` (`app/schemas/user.py`) now exposes
   `is_platform_admin`** on `/users/me` — the one piece of this field
@@ -2635,6 +2637,56 @@ items that didn't need a real external account/credentials to act on
   received a request from this code. MinIO's leniency being confirmed
   is a reason for *more* caution before trusting this against real AWS
   (the strict one), not less.
+
+## Post-Phase-7: AI analyst conversation history UI
+
+Closes the last gap from the backend-route-vs-frontend-call audit:
+`GET /ai-conversations/{id}` and `GET /datasets/{id}/conversations`
+were fully built and tested, but `AskAnalystBox` never tracked a
+`conversation_id` across questions (despite `api.askQuestion` already
+accepting one) and never showed more than the single latest answer —
+every question silently started a brand-new conversation, and the
+previous answer was wiped the instant a new one was submitted. Picked
+up as the first item of Phase B in a phased plan this session
+organized for the project's remaining work.
+
+- ✅ **Backend schema gap closed in passing**: `AIConversationOut`/
+  `AIMessageOut` had no `created_at` (and the conversation schema had
+  no `created_by_user_id`) even though the underlying models
+  (`TimestampMixin`) always had timestamps — added both, needed to
+  render "started 2 hours ago"-style UI from the API response as-is.
+- ✅ **A real authorization test gap closed**: the list endpoint
+  (`/datasets/{id}/conversations`) had an outsider-403 test; the detail
+  endpoint (`/ai-conversations/{id}`) — which is keyed purely by
+  conversation id with no dataset id in the URL to pre-check — did not.
+  Added `test_outsider_cannot_read_conversation_detail`.
+- ✅ **`AskAnalystBox` rewritten**: tracks `conversationId` in state
+  (`null` = next question starts fresh), re-fetches the full
+  conversation via `getConversation` after every turn and renders it as
+  a transcript (role, content, per-message "Backed by: <tools>") rather
+  than wiping the previous answer. "New conversation" clears the
+  active thread; "History" lists past conversations for this dataset
+  (title + timestamp) and clicking one loads it as the active
+  conversation — so the next question continues it, not just views it.
+- ✅ Automated backend tests: 320/320 passing (plus the 8 MinIO tests,
+  skipped here since no MinIO server was running — 1 new test in this
+  round: the outsider-403 detail-endpoint case above).
+- ✅ **Verified live against a real running server with a real
+  model** (an `LLM_API_KEY` is configured in this dev environment) —
+  not a scripted fake client: asked "What is the total rent across all
+  units?" against a real 3-row dataset and got "$4,150" (1,200 + 950 +
+  2,000, correct), backed by `descriptive_stats`. Asked a follow-up in
+  the *same* conversation, "What percentage of that total does Acme
+  Ltd account for?", without restating the total — the model correctly
+  used conversation context, called `group_aggregate` (not
+  `descriptive_stats` again), and answered 77.1% (3,200 ÷ 4,150,
+  correct) with Beta Co's 22.9% also stated correctly. Both turns
+  rendered as a real transcript. Clicked "New conversation" and
+  confirmed the transcript cleared; clicked "History" and confirmed the
+  real past conversation listed with its real title and timestamp;
+  clicked it and confirmed the exact two-turn transcript was restored
+  from the real `GET /ai-conversations/{id}` call, not a cached local
+  copy.
 
 ## Known limitations in what's built
 

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,6 +32,7 @@ class AIMessageOut(BaseModel):
     role: str
     content: str
     tool_calls: list[dict[str, Any]] | None
+    created_at: datetime
 
 
 class AIConversationOut(BaseModel):
@@ -40,4 +42,6 @@ class AIConversationOut(BaseModel):
     workspace_id: str
     dataset_id: str
     title: str | None
+    created_by_user_id: str
+    created_at: datetime
     messages: list[AIMessageOut]
