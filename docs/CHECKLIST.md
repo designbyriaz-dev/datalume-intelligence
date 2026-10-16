@@ -530,11 +530,11 @@ could be written honestly rather than guessed.
   percentage/fixed amount/fixed value — no multi-variable scenario
   presets, no saved/named scenarios, no scenario comparison across more
   than one adjustment set at a time.
-- ⬜ Version comparison requires the caller to know version numbers and
-  (when ambiguous) a sheet name — no UI yet for picking two versions
-  from a dropdown, and no "what changed" notification when a new version
-  is uploaded (the brief's "offer updated dashboards and reports" is not
-  automatic; comparison must be requested).
+- ✅⚠️ Picking two versions from a dropdown is done — see "Post-Phase-7:
+  dataset version comparison UI" below. Still true: no "what changed"
+  notification when a new version is uploaded (the brief's "offer
+  updated dashboards and reports" is not automatic; comparison must
+  still be requested, just no longer by knowing raw version numbers).
 - ⬜ SQLite vs. Postgres datetime quirk, newly relevant for scheduled
   reports: SQLite drops timezone info from `DateTime(timezone=True)`
   columns on round-trip (returns naive datetimes); Postgres preserves
@@ -1446,12 +1446,11 @@ delete a schedule, or to see whether its last email actually sent.
   via a direct API call, not just trusting the UI — that the workspace's
   schedule list was actually empty afterward. `npx tsc --noEmit` also
   passes with zero errors.
-- ⬜ No frontend test suite exists for this page (or any other page) yet
-  — `apps/web`'s `vitest run` script has no test files behind it
-  anywhere in the project; this feature was verified live in the
-  browser instead, consistent with how every other frontend change in
-  this project has been verified so far, but it means there's no
-  frontend regression net if a future change breaks this panel.
+- ✅⚠️ A first real frontend test suite now exists — see "Post-Phase-7:
+  first frontend test suite" below. This feature itself (the scheduled
+  reports panel) still has no dedicated test, just like every other
+  page component; the gap closed is "the `vitest run` script runs real
+  tests" at all, not "every page has coverage."
 
 ## Post-Phase-7: distributed scheduler lock
 
@@ -1995,12 +1994,14 @@ full sweep found two bigger gaps of the same shape — a complete,
 tested, multi-endpoint **Organizations** feature (create/list an org,
 invite members, an audit-log export) and a complete, tested
 **Webhooks** feature (subscribe/list/delete/test) — both with literally
-zero frontend trace, not even an orphaned `api.ts` method. Neither is
-built here: each is its own multi-page feature with real product/UX
-decisions attached (what does team onboarding look like? does
-workspace creation need an org picker?), not a self-contained wiring
-fix — flagged for a deliberate decision rather than built unprompted.
-Version comparison was the clearest *contained* case: `POST
+zero frontend trace, not even an orphaned `api.ts` method. Neither was
+built in this round: each is its own multi-page feature with real
+product/UX decisions attached (what does team onboarding look like?
+does workspace creation need an org picker?), not a self-contained
+wiring fix — flagged for a deliberate decision rather than built
+unprompted. Both were since built in later rounds — see "Post-Phase-7:
+webhooks UI" and "Post-Phase-7: organizations UI" below. Version
+comparison was the clearest *contained* case in this round: `POST
 /datasets/{id}/compare-versions` was fully built and tested in Phase 6
 (see the updated bullet above), and the workspace page already
 referenced the fact that multiple versions exist without ever letting
@@ -2234,6 +2235,57 @@ the KPI engine's exact date logic.
   and read its extracted text, confirming both the KPI-table label fix
   and the grammar fix actually render correctly, not just that the
   underlying numbers were right.
+
+## Post-Phase-7: first frontend test suite
+
+`apps/web`'s `package.json` has had a `"test": "vitest run"` script
+with `vitest` as a dependency since early in this project, but zero
+test files behind it anywhere — every frontend change instead relied
+entirely on live browser verification (real, but leaves no regression
+net). Closed by starting where the leverage is highest rather than
+picking an arbitrary page.
+
+- ✅ **`apps/web/src/lib/api.ts`'s `request`/`requestMultipart`
+  helpers** — not exported, so tested through the real public `api.*`
+  methods every page actually calls (`login`, `me`, `logout`,
+  `uploadDataset`) rather than against reimplementation-coupled
+  internals. Chosen as the starting point because literally every one
+  of this file's ~40 exported methods funnels through these two
+  functions — the single most load-bearing piece of logic in the
+  entire frontend, and the one most pages would silently break under if
+  it regressed.
+- ✅ `vitest.config.ts` (new, `environment: "node"` — no DOM needed for
+  this file, so no `jsdom`/`happy-dom`/`@testing-library/react`
+  dependency was added; a future suite testing actual page components
+  would need one of those).
+- ✅ Covers: successful JSON parsing, the base URL + `credentials:
+  "include"` + `Content-Type` sent on every request, the `Authorization`
+  header present when a token is given and absent when it isn't, a
+  `204` response returned as `undefined` without ever calling
+  `res.json()`, a thrown `ApiError` (real `instanceof` check, not just
+  a shape match) carrying the server's `detail` message, falling back
+  to `statusText` when the error body isn't valid JSON, stringifying a
+  non-string `detail` (FastAPI's 422 validation-error array shape), and
+  `requestMultipart` sending a real `FormData` body with no manual
+  `Content-Type` header (the browser must set its own boundary).
+- ✅ **Verified these tests actually catch a regression, not just that
+  they pass once**: temporarily broke the `detail` body-parsing line
+  (ignoring the server's error message), re-ran the suite, watched 3 of
+  10 tests fail with the exact expected diffs, then restored the
+  original code and confirmed all 10 pass again — the same
+  "prove a reverted bug would be caught" discipline used for the S3
+  region bug and the invalid-values coercion detection earlier in this
+  document, applied to frontend tests for the first time.
+- ✅ **Wired into CI**: `.github/workflows/ci.yml`'s `frontend-build`
+  job now runs `npm test` between the typecheck and build steps (fails
+  fast before spending time on a full Next.js build) — the step didn't
+  exist in the original CI workflow because there was nothing real for
+  it to run yet.
+- ⬜ Still only one file covered — `lib/auth.tsx` (the auth context/hook)
+  and every page component remain untested. A page/component suite
+  would need `jsdom` or `happy-dom` plus `@testing-library/react`,
+  neither installed yet — a reasonable next step, not done here to keep
+  this round's dependency footprint at zero new packages.
 
 ## Known limitations in what's built
 
