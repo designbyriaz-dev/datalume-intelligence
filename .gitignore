@@ -1,0 +1,24 @@
+# Python
+apps/api/.venv/
+apps/api/__pycache__/
+apps/api/**/__pycache__/
+apps/api/*.db
+apps/api/.pytest_cache/
+apps/api/var/
+*.pyc
+
+# Node / Next.js
+apps/web/node_modules/
+apps/web/.next/
+apps/web/out/
+
+# Env files (never commit real secrets)
+.env
+apps/api/.env
+apps/web/.env.local
+
+# OS
+.DS_Store
+
+# Claude Code local config
+.claude/launch.json

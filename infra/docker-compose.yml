@@ -1,0 +1,79 @@
+name: datalume
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: datalume
+      POSTGRES_PASSWORD: datalume
+      POSTGRES_DB: datalume
+    ports:
+      - "5432:5432"
+    volumes:
+      - datalume_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datalume"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # S3-compatible object storage for local development. Swap for a real
+  # bucket (AWS S3, Cloudflare R2, etc.) in staging/production via the
+  # S3_* environment variables — see ../.env.example.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: datalume
+      MINIO_ROOT_PASSWORD: datalume-dev-only
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - datalume_minio_data:/data
+
+  api:
+    build:
+      context: ../apps/api
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://datalume:datalume@postgres:5432/datalume
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  web:
+    build:
+      context: ../apps/web
+    env_file:
+      - ../.env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  datalume_postgres_data:
+  datalume_minio_data:
