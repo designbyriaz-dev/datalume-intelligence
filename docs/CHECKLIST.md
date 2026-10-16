@@ -245,13 +245,16 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   `frequency_table`, `time_trend`) — `correlation`'s scatter data,
   `descriptive_stats`' flat scalars, `detect_outliers`, and
   `simple_forecast`'s two-series shape still fall back to JSON.
-- ⬜ Most of the brief's report templates that need AI-generated
-  narrative (Executive Intelligence Report, Financial Performance
-  Report, etc.) — only the deterministic Data Quality Report exists at
-  Phase 3. (Four more deterministic, non-narrative reports — one per
-  industry pack — were added post-Phase-7; see the Phase 5 section
-  below. Those don't need this point's AI-narrative gap resolved, since
-  they were deliberately built without any AI involvement.)
+- ✅⚠️ The brief's report templates that need AI-generated narrative —
+  only the deterministic Data Quality Report existed at Phase 3. (Six
+  more deterministic, non-narrative reports were added post-Phase-7;
+  see the Phase 5 section below — those didn't need this gap resolved,
+  since they were deliberately built without any AI involvement.) The
+  gap itself is now closed for one template, Executive Intelligence —
+  see "Post-Phase-7: executive intelligence report (AI-generated
+  narrative)" below — proving the pattern works end-to-end against a
+  real model; Financial Performance Report and others on the brief's
+  list remain unbuilt but would follow the same proven pattern.
 - ⬜ Statistical rigor gaps, documented in `app/services/analytics.py`:
   `simple_forecast` is an explicit linear-trend baseline (not
   seasonality-aware, documented in its own output as a caveat) — the
@@ -427,23 +430,27 @@ could be written honestly rather than guessed.
   template, built in a later round still; see "Post-Phase-7: fourth
   specialist report template (business finance)" below. Every industry
   pack from the brief's Phase 5 "Create" list now has a report.
-- ⬜ ~~The other 8 report templates~~ 6 remain from the brief's list
-  (Investment Planning Report, Executive Intelligence Report, etc.) —
-  Compliance Exceptions and Repairs and Maintenance are now built too,
-  see "Post-Phase-7: fifth specialist report template (social housing
-  compliance exceptions)" and "Post-Phase-7: sixth specialist report
-  template (residential repairs and maintenance)" below (each attached
-  to an existing pack as a second report, not a new pack —
-  `commercial_property` and `business_finance` are the two packs that
-  still have only one report each: the former has no capex/valuation
-  field an Investment Planning report could use without inventing data,
-  the latter's one report already covers revenue/expenses/trends/top-
-  customers fairly completely). Each remaining template would follow
-  the exact same pattern (KPI engine + a PDF layout, now proven six
-  times), so adding one is a template-writing task, not an architecture
-  problem — a third report on an existing pack, or a new pack (public
-  sector/education), the latter needing real domain input first (see
-  `app/core/industry_packs.py`'s module docstring).
+- ✅⚠️ ~~The other 8 report templates~~ 5 remain from the brief's list.
+  Compliance Exceptions and Repairs and Maintenance were built as
+  per-pack second reports (see "Post-Phase-7: fifth specialist report
+  template (social housing compliance exceptions)" and "Post-Phase-7:
+  sixth specialist report template (residential repairs and
+  maintenance)" below); **Executive Intelligence** — the one template
+  on the brief's list that explicitly needs AI-generated narrative, not
+  just another deterministic KPI table — is now built too, see
+  "Post-Phase-7: executive intelligence report (AI-generated
+  narrative)" below. `commercial_property` and `business_finance` were
+  the two packs stuck with only one *deterministic* report each (the
+  former has no capex/valuation field an Investment Planning report
+  could use without inventing data; the latter's one report already
+  covers revenue/expenses/trends/top-customers fairly completely) —
+  Executive Intelligence sidesteps that entirely by being
+  industry-agnostic, so it's now available to every pack, including
+  those two, without inventing data for either. What's left (Financial
+  Performance Report, etc.) would each follow one of the two now-proven
+  patterns: KPI engine + deterministic PDF layout (six built), or KPI
+  engine + AI narrative (one built) — a template-writing task either
+  way, not an architecture problem.
 - ✅ Dashboards moved well past "KPI stat-cards only" — persisted
   dashboards with drag-and-drop reorder and chart widgets (not just the
   PDF report's static table) now exist; see "Post-Phase-7: dashboard
@@ -2800,6 +2807,93 @@ scenarios' results together instead of one at a time.
   Rent Roll 2.22 → 2.02/-9.0% and 0/-100.0%) — all correct. Confirmed
   "Close comparison" clears the table without affecting the saved
   scenarios or their checkboxes' underlying data.
+
+## Post-Phase-7: executive intelligence report (AI-generated narrative)
+
+The second of the two remaining Phase B items, and a bigger gap than
+the five report templates built in earlier rounds: those were all
+deterministic (KPI engine + a PDF layout), but the brief's list also
+names templates needing AI-generated narrative (Executive Intelligence
+Report, Financial Performance Report) — a capability that didn't exist
+anywhere in `app/services/reports.py` until now. Deliberately scoped to
+one, industry-agnostic template rather than guessing at several
+industry-specific narrative reports, to prove the pattern end-to-end
+against a real model first.
+
+- ✅ **`generate_executive_intelligence_report_pdf`**
+  (`app/services/reports.py`) — the first AI-narrative report in this
+  module; every other report function here stays purely deterministic
+  (module docstring updated). Unlike the six existing reports, it isn't
+  tied to any single `IndustryPack.report_templates` tuple — it renders
+  whatever KPI set `compute_kpis` returns for the workspace's assigned
+  pack, so `commercial_property` and `business_finance` (the two packs
+  stuck with only one report each — see the sixth-report section above
+  for why) get a second report too, without inventing industry-specific
+  content for either. The function itself stays synchronous (reportlab
+  is CPU-bound) — the async LLM call happens in the router, before the
+  PDF generator is invoked, and the generator just lays out the
+  pre-generated narrative string.
+- ✅ **`POST /dataset-tables/{id}/reports/executive-intelligence`**
+  (new, `app/api/v1/routers/reports.py`) — `Depends(get_llm_client_dep)`,
+  same dependency the AI analyst's `/ask` endpoint uses, listed after a
+  local `_require_executive_report_table` dependency so an unauthorized
+  caller gets 403 before a misconfigured server leaks a 503 (the exact
+  same ordering trick `ai_analyst.py`'s `_require_askable_table` already
+  uses, for the same reason). No try/except around the `llm_client.
+  complete()` call — matches `/ask`, which also lets a real provider
+  error surface as an unhandled 500 rather than inventing new
+  error-translation behaviour this codebase doesn't use anywhere else
+  yet. 400s if the workspace has no industry pack assigned (KPIs
+  wouldn't exist to summarize). **Known, deliberate scope decision**: no
+  quota check on this endpoint, even though it's the only report
+  endpoint that calls a paid external API — matches `/ask`, which also
+  has none; adding cost control for LLM-calling endpoints is a broader
+  decision affecting both, not something to invent for just this one
+  endpoint.
+- ✅ **`build_executive_summary_messages`/`EXECUTIVE_SUMMARY_SYSTEM_PROMPT`**
+  (`app/services/reports.py`) — pure, synchronous prompt construction
+  kept separate from the actual (async) LLM call, so it's testable
+  without a real or fake `LLMClient`. The system prompt explicitly
+  tells the model not to invent figures not present in the KPI table
+  and not to speculate about any KPI marked "not available."
+- ✅ **Two stale docstrings found and fixed while working nearby**:
+  `app/models/report.py`'s `Report` model docstring still said "Only
+  data_quality exists today" (six more report types have existed since
+  earlier rounds); `app/services/ai/llm_client.py`'s module docstring
+  still said `AnthropicLLMClient` had "NOT been exercised against a
+  real API key in this codebase" — false since the AI analyst
+  conversation-history round verified it against a real key (see
+  "Post-Phase-7: AI analyst conversation history UI" above). Both
+  corrected.
+- ✅ Automated backend tests: 333/333 passing (4 new, in
+  `tests/test_reports.py` — 503 when no `LLM_API_KEY` configured [real
+  behaviour, not scripted], 400 when the workspace has no industry pack
+  [with a scripted LLM client asserted never called], a full
+  scripted-LLM flow asserting the prompt sent to the model contained
+  the real computed KPI figures and the response came back as a real
+  downloadable PDF, and outsider-403 without any LLM override — mirrors
+  every assumption `test_ai_analyst_api.py` already makes for `/ask`).
+- ✅ Frontend: 36/36 passing (unchanged — `generateExecutiveIntelligenceReport`
+  is a one-line `api.ts` addition and a button reusing the existing
+  `IndustryKpiPanel` report-list rendering, no new pure logic to
+  unit-test; covered by live verification below instead).
+- ✅ **Verified live against a real running server with a real model**
+  (same `LLM_API_KEY` already confirmed working for the AI analyst) —
+  clicked "Download executive intelligence report" on a real
+  commercial-property workspace, got a real `201` in 10–15 seconds (a
+  real Anthropic API round trip, not instant), downloaded and read the
+  actual generated PDF with `pypdf`. Hand-checked every figure the
+  AI-generated summary cited against the real Key metrics table: "£4,500
+  from...three tenanted properties at an average rent of £1,500 each"
+  (exact), "zero vacancy" (exact), "all three leases...due to expire
+  within the next 12 months" (exact — correctly connected the
+  `Leases Expiring Within 12 Months: 3` KPI to all three units),
+  "tenant concentration stands at 100%" (exact — correctly reasoned
+  that 3 total tenants makes top-5 concentration 100%), "arrears stand
+  at just £100, representing a modest 2.2%" (exact). No hallucinated
+  figures found. The summary also added real analytical framing beyond
+  restating numbers — lease-expiry concentration risk and tenant
+  concentration risk — exactly what the system prompt asked for.
 
 ## Known limitations in what's built
 

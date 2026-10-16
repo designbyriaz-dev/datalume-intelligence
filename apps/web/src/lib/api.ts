@@ -895,6 +895,13 @@ export const api = {
       token
     ),
 
+  generateExecutiveIntelligenceReport: (token: string, tableId: string) =>
+    request<ReportMeta>(
+      `/api/v1/dataset-tables/${tableId}/reports/executive-intelligence`,
+      { method: "POST" },
+      token
+    ),
+
   listDashboards: (token: string, workspaceId: string) =>
     request<DashboardSummary[]>(`/api/v1/workspaces/${workspaceId}/dashboards`, {}, token),
 

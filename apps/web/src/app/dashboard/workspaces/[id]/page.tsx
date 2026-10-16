@@ -540,7 +540,15 @@ function IndustryKpiPanel({ tableId, token, industry }: { tableId: string; token
     }
   };
 
-  const reports = INDUSTRY_REPORTS[industry] ?? [];
+  // Executive intelligence is industry-agnostic (works from whatever
+  // pack the workspace is assigned, not a named pack — see
+  // generate_executive_intelligence_report_pdf's docstring in
+  // app/services/reports.py), so it's appended here rather than listed
+  // per-industry in INDUSTRY_REPORTS above.
+  const reports = [
+    ...(INDUSTRY_REPORTS[industry] ?? []),
+    { label: "Executive intelligence report", generate: api.generateExecutiveIntelligenceReport },
+  ];
 
   return (
     <div className="mt-3 rounded-md border border-slate-200 p-3 dark:border-slate-800">

@@ -1,13 +1,12 @@
 """LLM client abstraction for the AI data analyst.
 
-IMPORTANT — read this before trusting anything in this module worked:
-`AnthropicLLMClient` is written correctly against the documented Anthropic
-Messages API (tool use / agentic loop shape), but has NOT been exercised
-against a real API key in this codebase — there is no key configured in
-this environment. Only `FakeLLMClient` (in tests) has actually been
-exercised, and it tests the orchestration loop in planner.py, not real
-model behaviour. Do not report this as "working" until it's been run
-against a real key and someone has looked at a real answer.
+`AnthropicLLMClient` has been exercised against a real Anthropic API key
+in this dev environment — see docs/CHECKLIST.md's "Post-Phase-7: AI
+analyst conversation history UI" section for a real, hand-checked
+multi-turn conversation. Test suites still use `_ScriptedClient`-style
+fakes (see tests/test_ai_analyst_api.py), which test the orchestration
+loop in planner.py, not real model behaviour — that's intentional
+(deterministic, no real API calls in CI), not a gap.
 """
 
 from __future__ import annotations

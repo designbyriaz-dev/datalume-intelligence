@@ -6,11 +6,13 @@ from app.models.dataset import DatasetTable
 
 
 class Report(UUIDPKMixin, TimestampMixin, Base):
-    """A generated, downloadable report file. Only "data_quality" exists
-    today (see app/services/reports.py) — the brief's other eleven report
-    templates (Executive Intelligence, Financial Performance, etc.) are
-    backlog and would mostly need the AI analyst's narrative generation,
-    which isn't wired to a real model yet."""
+    """A generated, downloadable report file. `report_type` is a free
+    string, not a DB enum — see app/services/reports.py for every
+    `generate_*_report_pdf` function and app/api/v1/routers/reports.py
+    for the endpoint that creates each `report_type` value. Most are
+    deterministic KPI-table reports; "executive_intelligence" is the one
+    exception with an AI-generated narrative section (real LLM call, not
+    scaffolding — see that report's own docstring)."""
 
     __tablename__ = "reports"
 

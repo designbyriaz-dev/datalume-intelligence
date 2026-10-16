@@ -6,21 +6,27 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_http_client, get_object_storage
+from app.api.deps import get_current_user, get_http_client, get_llm_client_dep, get_object_storage
 from app.api.resolvers import get_table_chain_or_404
 from app.core.industry_packs import get_industry_pack
 from app.db.session import get_db
+from app.models.dataset import Dataset, DatasetTable
 from app.models.report import Report
 from app.models.user import User
+from app.models.workspace import Workspace
 from app.schemas.report import ReportOut
+from app.services.ai.llm_client import LLMClient
 from app.services.authz import require_workspace_access
 from app.services.datasets import get_dataset_table_dataframe
 from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, compute_kpis
 from app.services.industry_matching import get_effective_field_mapping
 from app.services.reports import (
+    EXECUTIVE_SUMMARY_SYSTEM_PROMPT,
+    build_executive_summary_messages,
     generate_business_finance_report_pdf,
     generate_commercial_property_report_pdf,
     generate_data_quality_report_pdf,
+    generate_executive_intelligence_report_pdf,
     generate_residential_property_report_pdf,
     generate_residential_repairs_maintenance_report_pdf,
     generate_social_housing_compliance_exceptions_report_pdf,
@@ -441,6 +447,103 @@ async def generate_residential_repairs_maintenance_report(
         id=report_id,
         dataset_table_id=table.id,
         report_type="residential_repairs_maintenance",
+        storage_key=storage_key,
+        file_size_bytes=len(pdf_bytes),
+        generated_by_user_id=current_user.id,
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+
+    await dispatch_event(
+        db,
+        http_client,
+        event_type="report.generated",
+        workspace_id=workspace.id,
+        payload={"report_id": report.id, "report_type": report.report_type, "dataset_table_id": table.id},
+    )
+
+    return report
+
+
+async def _require_executive_report_table(
+    table_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> tuple[DatasetTable, Dataset, Workspace]:
+    """Same ordering trick as ai_analyst.py's _require_askable_table —
+    resolved and auth-checked before get_llm_client_dep in the endpoint
+    signature below, so an unauthorized caller gets a 403, not a 503
+    that leaks "the server has no LLM key configured" before
+    authorization has even been checked."""
+    table, _version, dataset, workspace = await get_table_chain_or_404(db, table_id)
+    await require_workspace_access(db, current_user.id, workspace)
+    return table, dataset, workspace
+
+
+@router.post(
+    "/dataset-tables/{table_id}/reports/executive-intelligence",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_executive_intelligence_report(
+    table_id: str,
+    table_dataset_workspace: tuple[DatasetTable, Dataset, Workspace] = Depends(
+        _require_executive_report_table
+    ),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
+    llm_client: LLMClient = Depends(get_llm_client_dep),
+) -> Report:
+    """Unlike every other report endpoint in this file, industry-agnostic
+    — works for whatever pack the workspace is assigned, not one named
+    pack, since it isn't a per-pack template (see
+    generate_executive_intelligence_report_pdf's own docstring). The only
+    report endpoint that calls an LLM — no try/except around that call,
+    matching /dataset-tables/{id}/ask in ai_analyst.py, which also lets a
+    real provider error surface as an unhandled 500 rather than inventing
+    new error-translation behaviour this codebase doesn't use anywhere
+    else yet."""
+    table, dataset, workspace = table_dataset_workspace
+
+    pack = get_industry_pack(workspace.industry)
+    if pack is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This report needs an industry assigned to the workspace so KPIs can be computed.",
+        )
+
+    df = await get_dataset_table_dataframe(storage, table)
+    mapping = get_effective_field_mapping(table, pack, df.columns)
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
+
+    llm_response = await llm_client.complete(
+        system=EXECUTIVE_SUMMARY_SYSTEM_PROMPT,
+        messages=build_executive_summary_messages(kpi_results, pack.name),
+        tools=[],
+    )
+    narrative = llm_response.text or "The AI summary was empty — see the Key metrics table below."
+
+    pdf_bytes = generate_executive_intelligence_report_pdf(
+        dataset_name=dataset.name,
+        table_sheet_name=table.sheet_name,
+        generated_by_name=current_user.full_name,
+        industry_name=pack.name,
+        kpi_results=kpi_results,
+        narrative=narrative,
+    )
+
+    report_id = str(uuid.uuid4())
+    storage_key = f"workspaces/{workspace.id}/reports/{report_id}.pdf"
+    storage.write(storage_key, pdf_bytes)
+
+    report = Report(
+        id=report_id,
+        dataset_table_id=table.id,
+        report_type="executive_intelligence",
         storage_key=storage_key,
         file_size_bytes=len(pdf_bytes),
         generated_by_user_id=current_user.id,
