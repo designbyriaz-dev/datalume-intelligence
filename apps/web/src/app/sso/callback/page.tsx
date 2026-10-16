@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 
-export default function SsoCallbackPage() {
+function SsoCallbackContent() {
   const { completeSso } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -38,18 +38,32 @@ export default function SsoCallbackPage() {
   }, [searchParams, completeSso, router]);
 
   return (
+    <div className="mx-auto max-w-sm px-6 py-16 text-center">
+      {error ? (
+        <>
+          <h1 className="text-xl font-semibold text-red-600">Sign-in failed</h1>
+          <p className="mt-2 text-sm text-slate-500">{error}</p>
+        </>
+      ) : (
+        <p className="text-sm text-slate-500">Completing sign-in…</p>
+      )}
+    </div>
+  );
+}
+
+export default function SsoCallbackPage() {
+  return (
     <main className="min-h-screen">
       <NavBar />
-      <div className="mx-auto max-w-sm px-6 py-16 text-center">
-        {error ? (
-          <>
-            <h1 className="text-xl font-semibold text-red-600">Sign-in failed</h1>
-            <p className="mt-2 text-sm text-slate-500">{error}</p>
-          </>
-        ) : (
-          <p className="text-sm text-slate-500">Completing sign-in…</p>
-        )}
-      </div>
+      <Suspense
+        fallback={
+          <div className="mx-auto max-w-sm px-6 py-16 text-center">
+            <p className="text-sm text-slate-500">Completing sign-in…</p>
+          </div>
+        }
+      >
+        <SsoCallbackContent />
+      </Suspense>
     </main>
   );
 }

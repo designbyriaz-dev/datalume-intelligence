@@ -1,5 +1,7 @@
 # DataLume Intelligence
 
+[![CI](https://github.com/designbyriaz-dev/datalume-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/designbyriaz-dev/datalume-intelligence/actions/workflows/ci.yml)
+
 Turn Your Data Into Decisions.
 
 This repository is being built incrementally against the phased plan in the
