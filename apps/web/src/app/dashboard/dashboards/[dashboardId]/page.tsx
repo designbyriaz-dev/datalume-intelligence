@@ -31,6 +31,59 @@ import {
   type ToolSpec,
   ApiError,
 } from "@/lib/api";
+import { extractChartData, truncateLabel, type ChartBar } from "@/lib/charts";
+
+const CHART_ROW_HEIGHT = 20;
+const CHART_WIDTH = 260;
+const CHART_LABEL_WIDTH = 88;
+const CHART_VALUE_GUTTER = 44;
+
+function formatBarValue(value: number): string {
+  return Math.abs(value) >= 1000 ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function MiniBarChart({ bars }: { bars: ChartBar[] }) {
+  const maxAbs = Math.max(...bars.map((b) => Math.abs(b.value)), 1);
+  const barAreaWidth = CHART_WIDTH - CHART_LABEL_WIDTH - CHART_VALUE_GUTTER;
+  const height = bars.length * CHART_ROW_HEIGHT;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${CHART_WIDTH} ${height}`} role="img" aria-label="Bar chart">
+      {bars.map((bar, i) => {
+        const barWidth = Math.max(1, (Math.abs(bar.value) / maxAbs) * barAreaWidth);
+        const y = i * CHART_ROW_HEIGHT;
+        return (
+          <g key={`${bar.label}-${i}`}>
+            <text
+              x={0}
+              y={y + CHART_ROW_HEIGHT / 2 + 3}
+              fontSize="9"
+              className="fill-slate-600 dark:fill-slate-400"
+            >
+              {truncateLabel(bar.label, 14)}
+            </text>
+            <rect
+              x={CHART_LABEL_WIDTH}
+              y={y + 3}
+              width={barWidth}
+              height={CHART_ROW_HEIGHT - 8}
+              rx="2"
+              className="fill-brand-500"
+            />
+            <text
+              x={CHART_LABEL_WIDTH + barWidth + 4}
+              y={y + CHART_ROW_HEIGHT / 2 + 3}
+              fontSize="9"
+              className="fill-slate-700 dark:fill-slate-300"
+            >
+              {formatBarValue(bar.value)}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
 
 function WidgetCard({
   widget,
@@ -82,11 +135,27 @@ function WidgetCard({
       ) : widget.widget_type === "kpi" ? (
         <div className="mt-1 text-xl font-semibold">{value.formatted}</div>
       ) : (
-        <div className="mt-2 overflow-x-auto">
-          <pre className="text-xs text-slate-600 dark:text-slate-400">
-            {JSON.stringify(value.result, null, 2)}
-          </pre>
-        </div>
+        (() => {
+          const operation = typeof widget.config.operation === "string" ? widget.config.operation : undefined;
+          const chartData = extractChartData(operation, value.result);
+          if (chartData) {
+            return (
+              <div className="mt-2">
+                {chartData.caption && <div className="text-xs text-slate-400">{chartData.caption}</div>}
+                <div className="mt-1">
+                  <MiniBarChart bars={chartData.bars} />
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div className="mt-2 overflow-x-auto">
+              <pre className="text-xs text-slate-600 dark:text-slate-400">
+                {JSON.stringify(value.result, null, 2)}
+              </pre>
+            </div>
+          );
+        })()
       )}
     </div>
   );

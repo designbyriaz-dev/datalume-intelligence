@@ -234,10 +234,17 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   the section below). Earlier turns now replay with their original
   tool_use/tool_result block structure intact, not flattened to plain
   text.
-- ⬜ Charts: tool results contain chart-ready data (e.g. `group_aggregate`
-  returns labeled values), but there's no dedicated chart-spec
-  generation layer or frontend chart rendering yet — only the PDF
-  report's one bar chart exists today.
+- ✅⚠️ **Dashboard chart widgets now render a real chart** — see
+  "Post-Phase-7: real chart rendering for dashboard chart widgets"
+  below. Caught mid-session: the earlier "Add a chart widget" feature
+  (Phase 6 section) was misleadingly named — it added the ability to
+  pick any of the 7 analytics tools as a widget, but every one of them
+  rendered as a raw `JSON.stringify` dump, never an actual chart. Still
+  no AI/LLM "chart-spec generation" layer, and still only a bar-chart
+  renderer for 3 of the 7 operations (`group_aggregate`,
+  `frequency_table`, `time_trend`) — `correlation`'s scatter data,
+  `descriptive_stats`' flat scalars, `detect_outliers`, and
+  `simple_forecast`'s two-series shape still fall back to JSON.
 - ⬜ Most of the brief's report templates that need AI-generated
   narrative (Executive Intelligence Report, Financial Performance
   Report, etc.) — only the deterministic Data Quality Report exists at
@@ -2346,6 +2353,52 @@ usage history or proration display (still open, see Phase 4 above).
   `GET /billing/subscription` directly, confirming
   `resets_at: "2026-11-01T00:00:00Z"` in the raw JSON — not just that
   the UI showed a plausible-looking number.
+
+## Post-Phase-7: real chart rendering for dashboard chart widgets
+
+Found while scanning for the next gap to close: the Phase 6 "Add a
+chart widget" feature's own name turned out to be aspirational.
+`apps/web/src/app/dashboard/dashboards/[dashboardId]/page.tsx`'s
+`WidgetCard` rendered every non-KPI widget's result as
+`JSON.stringify(value.result, null, 2)` inside a `<pre>` tag — a chart
+*tool* picker with no chart *rendering* behind it, for any of the 7
+operations. Confirmed by reading the actual component code, not by
+trusting the feature's name.
+
+- ✅ **`apps/web/src/lib/charts.ts`** (new): `extractChartData(operation,
+  result)` dispatches on `widget.config.operation` (already flowed to
+  the frontend unchanged, no backend change needed) to turn 3 of the 7
+  tool-result shapes into a generic `{label, value}[]` bar series —
+  `group_aggregate`'s `groups`, `frequency_table`'s `top_values`,
+  `time_trend`'s `points` (kept to the most recent 10 — it's
+  chronologically ascending, so the tail is "most recent"). Every
+  other operation (`correlation`, `descriptive_stats`,
+  `detect_outliers`, `simple_forecast`) returns `null` and keeps the
+  existing JSON view — a deliberately incomplete dispatch rather than
+  inventing a misleading chart for a scatter/flat-scalar/two-series
+  shape that doesn't fit a single bar series.
+- ✅ **`MiniBarChart`**: a hand-rolled inline `<svg>` (horizontal bars,
+  so long category labels don't need rotation) — no charting library
+  added. Confirmed no existing chart library or CSP restriction in the
+  repo before choosing this over adding a dependency.
+- ✅ Automated frontend tests: 10 new in `lib/charts.test.ts` (37/37
+  total passing) — covers all three chartable shapes, non-numeric
+  values filtered out rather than crashing the chart, the 10-bar cap,
+  `time_trend` correctly keeping the *last* N points (not the first),
+  and `null` returned for both an unrecognized operation and a result
+  missing the expected array field entirely.
+- ✅ **Verified live against a real running server, both code paths**:
+  created a real workspace, uploaded a 6-row CSV, created a dashboard,
+  and added a `group_aggregate` widget (rent summed by category)
+  through the real `POST /dashboards/{id}/widgets` endpoint — the
+  browser rendered a real SVG bar chart with bars in the exact
+  descending order and proportions the API response's `groups` array
+  specified (Retail 2,700 longest, Office/Industrial 2,000 tied,
+  Residential 700 shortest). Then added a `descriptive_stats` widget
+  through the live "Add a chart widget" form in the UI and confirmed it
+  correctly fell back to the JSON view rather than a broken or
+  misleading chart — proving the dispatch's fallback path works
+  end-to-end, not just in the unit tests.
 
 ## Known limitations in what's built
 
