@@ -210,6 +210,51 @@ async def test_checkout_rejects_plan_with_no_configured_price(client: AsyncClien
     assert plan.stripe_price_id_annual is None
 
 
+async def test_concurrent_usage_counter_creation_does_not_crash(tmp_path) -> None:
+    """Regression test for a real race condition found while verifying the
+    scenario-comparison feature: comparing 2+ saved scenarios fires one
+    quota-incrementing POST per scenario in parallel
+    (ScenarioPanel.onCompare in the frontend), so two requests against the
+    same subscription can both miss _get_or_create_usage_counter's SELECT
+    and both try to INSERT this period's counter row — only one can win
+    the table's unique (subscription_id, period_key) constraint, and the
+    loser used to 500. Reproduced here with two independent connections
+    against a shared file-backed SQLite db (StaticPool's single shared
+    connection in the usual db_session fixture can't exhibit this)."""
+    import asyncio
+
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.db.base import Base
+    from app.models.billing import Subscription
+    from app.services.billing import _get_or_create_usage_counter, current_period_key
+
+    db_path = tmp_path / "usage_counter_race.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", poolclass=NullPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async with session_maker() as setup_session:
+        sub = Subscription(owner_user_id="race-owner", plan_id="free", status="active")
+        setup_session.add(sub)
+        await setup_session.commit()
+        subscription_id = sub.id
+
+    period_key = current_period_key()
+
+    async def race() -> str:
+        async with session_maker() as session:
+            counter = await _get_or_create_usage_counter(session, subscription_id, period_key)
+            await session.commit()
+            return counter.id
+
+    first_id, second_id = await asyncio.gather(race(), race())
+    assert first_id == second_id  # both calls resolve to the same, single row
+    await engine.dispose()
+
+
 async def test_max_upload_size_env_override_does_not_break_plan_enforcement(client: AsyncClient) -> None:
     """Regression test for the bug caught during this build: the global
     safety ceiling must stay >= every plan's limit, or higher-tier plans

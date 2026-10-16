@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.plans import DEFAULT_PLAN_ID, PlanLimits, get_plan
@@ -173,9 +174,26 @@ async def _get_or_create_usage_counter(db: AsyncSession, subscription_id: str, p
     if counter is not None:
         return counter
 
-    counter = UsageCounter(subscription_id=subscription_id, period_key=period_key, analyses_count=0)
-    db.add(counter)
-    await db.flush()
+    # Two concurrent requests against the same subscription (e.g.
+    # comparing several saved scenarios at once, which fires one
+    # quota-incrementing run per scenario in parallel) can both miss the
+    # SELECT above and both try to create this period's counter — the
+    # table's unique (subscription_id, period_key) constraint lets only
+    # one INSERT win. Run it in a savepoint so the loser's failed insert
+    # doesn't poison the rest of the request's transaction, and just
+    # re-read the row the winner created instead of failing the request.
+    try:
+        async with db.begin_nested():
+            counter = UsageCounter(subscription_id=subscription_id, period_key=period_key, analyses_count=0)
+            db.add(counter)
+            await db.flush()
+    except IntegrityError:
+        result = await db.execute(
+            select(UsageCounter).where(
+                UsageCounter.subscription_id == subscription_id, UsageCounter.period_key == period_key
+            )
+        )
+        counter = result.scalar_one()
     return counter
 
 

@@ -541,13 +541,14 @@ could be written honestly rather than guessed.
   done, see "Post-Phase-7: dashboard drag-and-drop reorder" below.
   Widget *resizing* and multiple saved layouts per table are still not
   built — only reorder-within-a-list, no freeform/2D grid placement.
-- ✅⚠️ **Saved/named scenarios** — done, see "Post-Phase-7: saved
-  scenarios and a scenario modeling UI" below, which also closed a
-  much bigger gap found along the way: no frontend UI for scenario
-  modeling existed at all before this round, ad-hoc or saved. Still
-  true: no multi-variable "preset" concept beyond a saved scenario's
-  own adjustment list, and no comparison across more than one
-  adjustment set at a time in a single view.
+- ✅ **Saved/named scenarios, with side-by-side comparison** — done, see
+  "Post-Phase-7: saved scenarios and a scenario modeling UI" and
+  "Post-Phase-7: scenario comparison" below. A saved scenario already
+  held a multi-adjustment list (up to 10 adjustments), so that half of
+  the old gap was already closed; what was missing was a way to view
+  more than one scenario's results at once — closed by letting the user
+  multi-select saved scenarios and compare them in a single table
+  (baseline + one column per scenario, with per-KPI % change).
 - ✅⚠️ Picking two versions from a dropdown is done — see "Post-Phase-7:
   dataset version comparison UI" below. Still true: no "what changed"
   notification when a new version is uploaded (the brief's "offer
@@ -2744,6 +2745,61 @@ enforced against a live `Membership` count.
   backend's 400 — "Cannot remove the last owner of an organization —
   make someone else an owner first." — rendered correctly as an error
   message, not a silent failure or a generic one.
+
+## Post-Phase-7: scenario comparison
+
+The first of the two remaining Phase B items — scenario modeling's last
+documented gap, "no comparison across more than one adjustment set at a
+time in a single view." A saved scenario already supports up to 10
+adjustments, so the "multi-variable preset" half of the old wording was
+already satisfied; this closes the other half: viewing several saved
+scenarios' results together instead of one at a time.
+
+- ✅ **Frontend-only — no new backend endpoint**: `ScenarioPanel`
+  (`apps/web/src/app/dashboard/workspaces/[id]/page.tsx`) already called
+  `POST /saved-scenarios/{id}/run` for a single scenario; comparison
+  just fires that same call once per selected scenario (`Promise.all`)
+  and renders the results together. Each saved scenario's checkbox adds
+  it to a `compareIds` set; "Compare selected (N)" (enabled at 2+) runs
+  them and builds a table — KPI rows, a shared Baseline column (taken
+  from the first response; all selected scenarios run against the same
+  live dataset, so their baselines are identical), then one column per
+  scenario showing its value and colour-coded % change. "Close
+  comparison" clears it.
+- 🐛 **Found and fixed a real concurrency bug while verifying this
+  live**: comparing 2+ scenarios is the first place in the app that
+  fires multiple quota-incrementing requests against the *same*
+  subscription in parallel. `billing._get_or_create_usage_counter`
+  did a plain SELECT-then-INSERT with no protection against two
+  requests both missing the SELECT and both trying to INSERT the same
+  `(subscription_id, period_key)` row — the table's unique constraint
+  let only one win, and the loser 500'd instead of the quota check
+  just working. Reproduced against the real dev server (two real
+  concurrent `POST .../run` calls from the browser, one failing with
+  `sqlite3.IntegrityError: UNIQUE constraint failed`), then fixed by
+  wrapping the insert in a nested transaction (`db.begin_nested()`) and
+  falling back to a re-SELECT on `IntegrityError` — the loser just
+  reads the winner's row instead of crashing the request.
+- ✅ Automated backend tests: 329/329 passing (1 new,
+  `test_concurrent_usage_counter_creation_does_not_crash` in
+  `tests/test_billing.py` — reproduces the exact race with two
+  independent connections against a shared file-backed SQLite db, since
+  the test suite's usual single-connection in-memory `db_session`
+  fixture can't exhibit it; confirmed this test actually fails with the
+  real `IntegrityError` when run against the pre-fix code, then passes
+  after the fix).
+- ✅ Frontend: 36/36 passing (unchanged — this feature has no pure logic
+  worth unit-testing in isolation; covered by live verification below
+  instead).
+- ✅ **Verified live against a real running server**: created a
+  workspace + dataset, saved two scenarios with different adjustments
+  ("Rent +10%" and "Rent +5%, arrears cleared"), selected both and
+  clicked Compare. Hand-checked the resulting table against the raw
+  data (Total Rent Roll baseline 4500 → 4950/+10.0% and 4725/+5.0%;
+  Total Arrears baseline 100 → 100/0.0% and 0/-100.0%; Arrears as % of
+  Rent Roll 2.22 → 2.02/-9.0% and 0/-100.0%) — all correct. Confirmed
+  "Close comparison" clears the table without affecting the saved
+  scenarios or their checkboxes' underlying data.
 
 ## Known limitations in what's built
 

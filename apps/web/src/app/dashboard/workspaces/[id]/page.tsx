@@ -638,6 +638,11 @@ function ScenarioPanel({
   const [scenarioName, setScenarioName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<SavedScenario[]>([]);
+  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  const [comparison, setComparison] = useState<{ scenario: SavedScenario; response: ScenarioResponse }[] | null>(
+    null
+  );
+  const [comparing, setComparing] = useState(false);
 
   const loadSaved = useCallback(async () => {
     try {
@@ -720,8 +725,42 @@ function ScenarioPanel({
     try {
       await api.deleteSavedScenario(token, id);
       await loadSaved();
+      setCompareIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not delete saved scenario.");
+    }
+  };
+
+  const onToggleCompare = (id: string) => {
+    setCompareIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const onCompare = async () => {
+    const ids = Array.from(compareIds);
+    if (ids.length < 2) return;
+    setComparing(true);
+    setError(null);
+    try {
+      const responses = await Promise.all(ids.map((id) => api.runSavedScenario(token, id)));
+      setComparison(
+        ids.map((id, i) => ({
+          scenario: saved.find((s) => s.id === id)!,
+          response: responses[i],
+        }))
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not compare scenarios.");
+    } finally {
+      setComparing(false);
     }
   };
 
@@ -824,7 +863,15 @@ function ScenarioPanel({
           <ul className="mt-1 space-y-1">
             {saved.map((s) => (
               <li key={s.id} className="flex items-center justify-between gap-2 text-xs">
-                <span>{s.name}</span>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={compareIds.has(s.id)}
+                    onChange={() => onToggleCompare(s.id)}
+                    aria-label={`Select ${s.name} for comparison`}
+                  />
+                  <span>{s.name}</span>
+                </label>
                 <span className="flex gap-3">
                   <button
                     onClick={() => onRunSaved(s.id)}
@@ -840,6 +887,74 @@ function ScenarioPanel({
               </li>
             ))}
           </ul>
+          {saved.length > 1 && (
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                onClick={onCompare}
+                disabled={compareIds.size < 2 || comparing}
+                className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+              >
+                {comparing ? "Comparing…" : `Compare selected (${compareIds.size})`}
+              </button>
+              {comparison && (
+                <button
+                  onClick={() => setComparison(null)}
+                  className="text-xs text-slate-400 hover:text-red-500"
+                >
+                  Close comparison
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {comparison && (
+        <div className="mt-3 overflow-x-auto">
+          <div className="text-xs font-medium text-slate-500">Scenario comparison</div>
+          <table className="mt-1 w-full text-left text-xs">
+            <thead>
+              <tr className="text-slate-500">
+                <th className="pr-4 py-1">KPI</th>
+                <th className="pr-4 py-1">Baseline</th>
+                {comparison.map(({ scenario }) => (
+                  <th key={scenario.id} className="pr-4 py-1">
+                    {scenario.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {comparison[0].response.kpi_deltas.map((baselineDelta) => (
+                <tr key={baselineDelta.kpi_id} className="border-t border-slate-200 dark:border-slate-800">
+                  <td className="pr-4 py-1 font-medium">{baselineDelta.name}</td>
+                  <td className="pr-4 py-1">{baselineDelta.baseline_value ?? "—"}</td>
+                  {comparison.map(({ scenario, response }) => {
+                    const d = response.kpi_deltas.find((x) => x.kpi_id === baselineDelta.kpi_id);
+                    return (
+                      <td key={scenario.id} className="pr-4 py-1">
+                        {d?.scenario_value ?? "—"}
+                        {d?.pct_change !== null && d?.pct_change !== undefined && (
+                          <span
+                            className={
+                              d.pct_change > 0
+                                ? "ml-1 text-green-600"
+                                : d.pct_change < 0
+                                  ? "ml-1 text-red-600"
+                                  : "ml-1 text-slate-500"
+                            }
+                          >
+                            ({d.pct_change > 0 ? "+" : ""}
+                            {d.pct_change.toFixed(1)}%)
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
