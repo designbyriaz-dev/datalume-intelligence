@@ -2688,6 +2688,63 @@ organized for the project's remaining work.
   from the real `GET /ai-conversations/{id}` call, not a cached local
   copy.
 
+## Post-Phase-7: organization member management
+
+The second item of Phase B in a session-organized phased plan for the
+project's remaining work — two related gaps in the "Known limitations"
+list closed together: no way to remove a member or change their role
+once invited, and `PlanLimits.max_team_members` defined but never
+enforced against a live `Membership` count.
+
+- ✅ **`DELETE`/`PATCH /organizations/{id}/members/{membership_id}`**
+  (new, `app/api/v1/routers/organizations.py`): both gated behind
+  `require_org_manager` — the exact same owner/admin-only authz helper
+  `invite_member` and the audit-log export already use, no new authz
+  concept needed. A new `_is_last_owner` guard blocks both removing and
+  demoting an organization's last owner (400, not a 500 from a broken
+  invariant) — `ORG_MANAGE_ROLES` itself has no such guard, so this
+  lives in the router. Both actions are audit-logged
+  (`organization.member_removed`/`organization.member_role_changed`,
+  added to `app/services/audit.py`'s `EVENT_TYPES` allowlist — every
+  event type is explicitly allow-listed, so a typo in a call site fails
+  loudly rather than silently writing an unqueryable event, same
+  discipline as every other audited action in this app).
+- ✅ **`max_team_members` enforced**: `billing.check_team_member_limit`
+  (new, mirrors `check_upload_allowed`'s `max_saved_datasets` check
+  exactly — same `QuotaExceededError` → `402 Payment Required`
+  translation already used in 3 other routers) runs inside
+  `invite_member`, for both the direct-add and email-invite branches.
+  **Documented, not silently accepted, limitation**: the email-invite
+  branch doesn't create a `Membership` until the invitee accepts, so
+  this can only compare against the *current* member count, not
+  pending invites — several accepted invites landing close together
+  could still momentarily exceed the cap. Catching the common case
+  (inviting past capacity) without building invite "reservations" was
+  judged the right scope for this round.
+- ✅ **Frontend**: `OrganizationPanel`'s member list — previously a
+  static role `<span>` with no controls — now has a role `<select>`
+  (reusing the existing `MEMBERSHIP_ROLES` constant, same options the
+  invite form already offers) and a "Remove" button per row, both
+  reusing the panel's existing `error` display for any 400/402/403 the
+  backend returns (no new error-handling UI needed — `ApiError.message`
+  already surfaces the backend's `detail` text verbatim).
+- ✅ Automated backend tests: 328/328 passing (8 new, in
+  `tests/test_organization_members.py` — remove, change role, reject
+  an unknown role string, a non-manager 403d on both, removing and
+  demoting the last owner both rejected, removing a *non*-last owner
+  succeeding, and `max_team_members` enforcement proven by actually
+  bumping a test org onto the real `business` plan (cap 5), filling it
+  to exactly 5 members, and confirming the 6th invite gets a real 402).
+- ✅ **Verified live against a real running server**: invited a real
+  second user as analyst, changed their role to viewer through the real
+  UI and confirmed the real `PATCH .../members/{id}` (200) in the
+  network panel and the row updating to "VIEWER", removed them and
+  confirmed the real `DELETE` (204) and the row disappearing, then
+  tried removing the one remaining owner and confirmed the real
+  backend's 400 — "Cannot remove the last owner of an organization —
+  make someone else an owner first." — rendered correctly as an error
+  message, not a silent failure or a generic one.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -2701,15 +2758,9 @@ organized for the project's remaining work.
   tests against a real Postgres container before Phase 2 lands.
 - **`JWT_SECRET` has an insecure default** — the app will run with it, but
   anyone deploying beyond localhost must override it (see docs/SECURITY.md).
-- **Organizations: no way to remove a member or change their role once
-  invited** — `app/api/v1/routers/organizations.py` has create/list/
-  invite/members/audit-log but no `PATCH`/`DELETE` on a `Membership`.
-  Also, `PlanLimits.max_team_members` (`app/core/plans.py`) is defined
-  and shown on the pricing page but nothing enforces it against a live
-  `Membership` count — an organization can invite past its plan's team
-  size with no backend pushback. Both are real gaps in a feature that's
-  otherwise verified end-to-end (see "Post-Phase-7: organizations UI"
-  above), not yet built.
+- ~~Organizations: no way to remove a member or change their role once
+  invited, and max_team_members unenforced~~ — both done, see
+  "Post-Phase-7: organization member management" below.
 - **S3Storage is tested against a mocked S3 API and a real MinIO
   server, not a real AWS/R2 bucket**: `tests/test_s3_storage.py` runs
   the real boto3 client code (bucket auto-creation, write, read,

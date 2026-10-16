@@ -5,7 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_email_sender_optional_dep
@@ -25,7 +25,9 @@ from app.schemas.organization import (
     OrganizationCreate,
     OrganizationOut,
     PendingInviteOut,
+    UpdateMembershipRoleRequest,
 )
+from app.services import billing
 from app.services.audit import record_audit_event
 from app.services.authz import require_membership, require_org_manager
 from app.services.email import EmailMessage, EmailSender
@@ -126,6 +128,19 @@ async def invite_member(
     except ValueError:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown role: {payload.role}")
 
+    # Checked for both branches below (email-invite and direct-add): the
+    # email-invite branch doesn't create a Membership until the invitee
+    # accepts, so this can only compare against the *current* member
+    # count, not pending invites — an org could still stack up accepted
+    # invites past capacity if several land at once. Good enough to stop
+    # the common case (inviting past capacity) without new infrastructure
+    # to track pending-invite "reservations".
+    subscription = await billing.get_or_create_subscription_for_organization(db, organization_id)
+    try:
+        await billing.check_team_member_limit(db, subscription, organization_id)
+    except billing.QuotaExceededError as exc:
+        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, str(exc)) from exc
+
     invitee = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
     if invitee is None:
         if email_sender is None:
@@ -189,6 +204,87 @@ async def invite_member(
         actor_user_id=current_user.id,
         organization_id=organization_id,
         metadata={"invitee_email": payload.email, "role": role.value},
+    )
+    await db.commit()
+    await db.refresh(membership)
+    return membership
+
+
+async def _is_last_owner(db: AsyncSession, membership: Membership) -> bool:
+    if MembershipRole(membership.role) != MembershipRole.OWNER:
+        return False
+    result = await db.execute(
+        select(func.count(Membership.id)).where(
+            Membership.organization_id == membership.organization_id,
+            Membership.role == MembershipRole.OWNER,
+        )
+    )
+    return result.scalar_one() <= 1
+
+
+@router.delete("/{organization_id}/members/{membership_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_organization_member(
+    organization_id: str,
+    membership_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await require_org_manager(db, current_user.id, organization_id)
+
+    membership = await db.get(Membership, membership_id)
+    if membership is None or membership.organization_id != organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership not found")
+
+    if await _is_last_owner(db, membership):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Cannot remove the last owner of an organization — make someone else an owner first.",
+        )
+
+    await record_audit_event(
+        db,
+        event_type="organization.member_removed",
+        actor_user_id=current_user.id,
+        organization_id=organization_id,
+        metadata={"removed_user_id": membership.user_id, "role": MembershipRole(membership.role).value},
+    )
+    await db.delete(membership)
+    await db.commit()
+
+
+@router.patch("/{organization_id}/members/{membership_id}", response_model=MembershipOut)
+async def update_member_role(
+    organization_id: str,
+    membership_id: str,
+    payload: UpdateMembershipRoleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Membership:
+    await require_org_manager(db, current_user.id, organization_id)
+
+    try:
+        new_role = MembershipRole(payload.role)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown role: {payload.role}")
+
+    membership = await db.get(Membership, membership_id)
+    if membership is None or membership.organization_id != organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Membership not found")
+
+    if new_role != MembershipRole.OWNER and await _is_last_owner(db, membership):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Cannot change the last owner's role away from owner — make someone else an owner first.",
+        )
+
+    old_role = MembershipRole(membership.role).value
+    membership.role = new_role
+    await record_audit_event(
+        db,
+        event_type="organization.member_role_changed",
+        actor_user_id=current_user.id,
+        organization_id=organization_id,
+        metadata={"member_user_id": membership.user_id, "old_role": old_role, "new_role": new_role.value},
     )
     await db.commit()
     await db.refresh(membership)

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.plans import DEFAULT_PLAN_ID, PlanLimits, get_plan
 from app.models.billing import Subscription, UsageCounter
 from app.models.dataset import Dataset
+from app.models.membership import Membership
 from app.models.workspace import Workspace
 
 
@@ -136,6 +137,30 @@ async def check_upload_allowed(db: AsyncSession, subscription: Subscription, fil
                 f"The {plan.name} plan allows at most {plan.max_saved_datasets} saved datasets "
                 f"(you have {current_count}). Upgrade your plan or delete an existing dataset."
             )
+
+
+async def count_organization_members(db: AsyncSession, organization_id: str) -> int:
+    result = await db.execute(
+        select(func.count(Membership.id)).where(Membership.organization_id == organization_id)
+    )
+    return result.scalar_one()
+
+
+async def check_team_member_limit(db: AsyncSession, subscription: Subscription, organization_id: str) -> None:
+    """Only business/team plans define max_team_members (free/personal/
+    professional/enterprise are None, i.e. not applicable — enterprise is
+    custom/contact-sales, deliberately treated as unlimited here same as
+    max_analyses_per_month/max_saved_datasets elsewhere in this module)."""
+    plan = plan_for(subscription)
+    if plan.max_team_members is None:
+        return
+
+    current_count = await count_organization_members(db, organization_id)
+    if current_count >= plan.max_team_members:
+        raise QuotaExceededError(
+            f"The {plan.name} plan allows at most {plan.max_team_members} team members "
+            f"(you have {current_count}). Upgrade your plan or remove a member."
+        )
 
 
 async def _get_or_create_usage_counter(db: AsyncSession, subscription_id: str, period_key: str) -> UsageCounter:

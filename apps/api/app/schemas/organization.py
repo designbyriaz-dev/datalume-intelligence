@@ -18,6 +18,10 @@ class InviteMemberRequest(BaseModel):
     role: str = "analyst"
 
 
+class UpdateMembershipRoleRequest(BaseModel):
+    role: str
+
+
 class MembershipOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

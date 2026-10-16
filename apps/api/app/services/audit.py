@@ -50,6 +50,8 @@ EVENT_TYPES = {
     "auth.password_reset_completed",
     "organization.invite_emailed",
     "organization.invite_accepted",
+    "organization.member_removed",
+    "organization.member_role_changed",
 }
 
 

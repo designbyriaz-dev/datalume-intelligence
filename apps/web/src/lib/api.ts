@@ -596,6 +596,20 @@ export const api = {
       token
     ),
 
+  removeOrganizationMember: (token: string, organizationId: string, membershipId: string) =>
+    request<void>(
+      `/api/v1/organizations/${organizationId}/members/${membershipId}`,
+      { method: "DELETE" },
+      token
+    ),
+
+  updateMembershipRole: (token: string, organizationId: string, membershipId: string, role: string) =>
+    request<MembershipCreated>(
+      `/api/v1/organizations/${organizationId}/members/${membershipId}`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+      token
+    ),
+
   getOrganizationAuditLog: (token: string, organizationId: string) =>
     request<AuditLogEntry[]>(`/api/v1/organizations/${organizationId}/audit-log`, {}, token),
 

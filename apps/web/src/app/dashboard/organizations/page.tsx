@@ -32,6 +32,7 @@ function OrganizationPanel({ org, token }: { org: Organization; token: string })
   const [inviting, setInviting] = useState(false);
   const [inviteResult, setInviteResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
 
   const loadMembers = useCallback(async () => {
     try {
@@ -64,6 +65,32 @@ function OrganizationPanel({ org, token }: { org: Organization; token: string })
       setError(err instanceof ApiError ? err.message : "Could not send invite.");
     } finally {
       setInviting(false);
+    }
+  };
+
+  const onChangeRole = async (membershipId: string, role: string) => {
+    setMemberBusyId(membershipId);
+    setError(null);
+    try {
+      await api.updateMembershipRole(token, org.id, membershipId, role);
+      await loadMembers();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change that member's role.");
+    } finally {
+      setMemberBusyId(null);
+    }
+  };
+
+  const onRemoveMember = async (membershipId: string) => {
+    setMemberBusyId(membershipId);
+    setError(null);
+    try {
+      await api.removeOrganizationMember(token, org.id, membershipId);
+      await loadMembers();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not remove that member.");
+    } finally {
+      setMemberBusyId(null);
     }
   };
 
@@ -102,12 +129,33 @@ function OrganizationPanel({ org, token }: { org: Organization; token: string })
             ) : (
               <ul className="mt-1 divide-y divide-slate-200 dark:divide-slate-800">
                 {members.map((m) => (
-                  <li key={m.id} className="flex items-center justify-between py-2 text-sm">
+                  <li key={m.id} className="flex items-center justify-between gap-2 py-2 text-sm">
                     <div>
                       <span className="font-medium">{m.user_full_name}</span>{" "}
                       <span className="text-xs text-slate-500">{m.user_email}</span>
                     </div>
-                    <span className="text-xs uppercase text-slate-500">{m.role}</span>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={m.role}
+                        disabled={memberBusyId === m.id}
+                        onChange={(e) => onChangeRole(m.id, e.target.value)}
+                        className="rounded-md border border-slate-300 bg-transparent px-2 py-1 text-xs uppercase disabled:opacity-50 dark:border-slate-700"
+                      >
+                        {MEMBERSHIP_ROLES.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveMember(m.id)}
+                        disabled={memberBusyId === m.id}
+                        className="text-xs text-slate-400 hover:text-red-500 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
