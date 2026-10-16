@@ -18,13 +18,21 @@ semantics, not a hand-rolled stub. That's real: it caught a genuine bug
 directly would never have caught, because the bug was in *which
 arguments* real S3 requires, not in this code's own logic.
 
-What that does NOT prove: moto accurately emulates AWS S3's behavior,
-not any specific S3-compatible service's. MinIO in particular is known
-to be lenient about things AWS is strict about (the region/
-LocationConstraint issue below, for one) — this has still never been
-run against a real MinIO container or a real AWS/R2 bucket. Do not
-report S3Storage as "verified" in the full sense until that's been done
-— see docs/DEPLOYMENT.md.
+Also verified against a real (locally-run) MinIO server —
+tests/test_s3_storage_minio.py — mirroring every case above plus one
+that specifically settles the "MinIO is known to be lenient" claim
+empirically (calling create_bucket the pre-fix, no-LocationConstraint
+way directly, against a non-us-east-1 region, and confirming it
+succeeds against real MinIO rather than just assuming it would). That
+test file skips itself when no MinIO server is reachable, so it never
+blocks CI — run it for real with `brew install minio && minio server
+/tmp/some-dir --address :9000` (or `docker compose up minio`), then
+`pytest tests/test_s3_storage_minio.py`.
+
+Still not proven: a real AWS S3 or Cloudflare R2 bucket — MinIO's
+leniency is now confirmed, not just assumed, but that's a reason for
+more caution in production against real AWS, not less, since AWS is
+the strict one. See docs/DEPLOYMENT.md.
 """
 
 from __future__ import annotations

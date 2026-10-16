@@ -959,13 +959,9 @@ have:
   reverting it and confirming 6 of the 7 tests fail with the exact AWS
   error (`IllegalLocationConstraintException`) a real deployment would
   have hit.
-- ⬜ **Still not run against MinIO or a real AWS/R2 bucket.** moto
-  emulates AWS's own documented behavior, not any specific
-  S3-compatible service's — and MinIO is known to be lenient about
-  exactly the kind of region strictness the bug above depended on,
-  which is plausibly why a MinIO-only test pass would have missed it
-  entirely. This is a genuine step up in rigor, not a substitute for
-  running it against MinIO per docs/DEPLOYMENT.md.
+- ✅⚠️ **Now run against a real MinIO server** — see "Post-Phase-7: S3Storage
+  verified against real MinIO" below. Still true: no real AWS S3 or
+  Cloudflare R2 bucket has received a request from this code yet.
 
 ## Post-Phase-7: conversation history replay fidelity
 
@@ -2600,6 +2596,46 @@ follow, just as a full page instead of a collapsible per-org panel.
   appeared at the top of the list on a fresh load — not a canned fixture,
   an event this session's own actions in the real browser actually wrote.
 
+## Post-Phase-7: S3Storage verified against real MinIO
+
+Closes the long-standing "S3Storage is tested against moto, never a
+real MinIO or AWS bucket" gap — the first item of the phased plan this
+session organized for remaining work, and the only one of its three
+items that didn't need a real external account/credentials to act on
+(Okta/Azure AD SSO and Stripe live mode both do, and are still open).
+
+- ✅ **Real MinIO server, not Docker** — Docker wasn't available in
+  this environment, so `brew install minio` (the standalone server
+  binary MinIO ships, separate from its Docker image) ran a real local
+  MinIO instance instead of `docker compose up minio`
+  (`infra/docker-compose.yml`'s existing service). Same real S3-API
+  server either way — this is a tooling substitution, not a smaller
+  test.
+- ✅ **`tests/test_s3_storage_minio.py`** (new): the exact same 7 cases
+  as `tests/test_s3_storage.py`'s moto suite (bucket auto-creation in a
+  non-default region and in `us-east-1`, not recreating an existing
+  bucket, exact byte round-tripping including null/non-UTF8 bytes,
+  missing-key read, delete, overwrite), run against the real server
+  instead of a mock. Skips the whole module (not a failure) when no
+  MinIO is reachable at `MINIO_TEST_ENDPOINT`, so it can never break CI
+  — confirmed both ways: 8 passed with MinIO running, 8 skipped with it
+  stopped.
+- ✅ **The "MinIO is known to be lenient" claim, empirically settled,
+  not just repeated** — `docs/CHECKLIST.md` and `app/services/storage.py`
+  had both asserted this for a while as a plausible reason the original
+  region bug went unnoticed, without ever actually testing it. A new
+  dedicated test calls `create_bucket` the exact pre-fix, no-
+  `CreateBucketConfiguration` way, directly, against a non-`us-east-1`
+  region — the precise shape that raises
+  `IllegalLocationConstraintException` against real AWS and against
+  moto — and confirms it genuinely succeeds against real MinIO. The
+  claim was true, but now it's verified rather than assumed.
+- ✅ Automated backend tests: 327/327 passing (8 new).
+- ⬜ Still open: a real AWS S3 or Cloudflare R2 bucket has never
+  received a request from this code. MinIO's leniency being confirmed
+  is a reason for *more* caution before trusting this against real AWS
+  (the strict one), not less.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -2622,23 +2658,22 @@ follow, just as a full page instead of a collapsible per-org panel.
   size with no backend pushback. Both are real gaps in a feature that's
   otherwise verified end-to-end (see "Post-Phase-7: organizations UI"
   above), not yet built.
-- **S3Storage is tested against a mocked S3 API, not a real bucket**:
-  `tests/test_s3_storage.py` runs the real boto3 client code (bucket
-  auto-creation, write, read, read-of-missing-key, delete, overwrite)
-  against moto — a fake AWS backend that implements the actual S3 API
-  semantics, not a hand-rolled stub. This caught and fixed a real bug:
-  bucket auto-creation called `create_bucket` with no
+- **S3Storage is tested against a mocked S3 API and a real MinIO
+  server, not a real AWS/R2 bucket**: `tests/test_s3_storage.py` runs
+  the real boto3 client code (bucket auto-creation, write, read,
+  read-of-missing-key, delete, overwrite) against moto — a fake AWS
+  backend that implements the actual S3 API semantics, not a
+  hand-rolled stub. This caught and fixed a real bug: bucket
+  auto-creation called `create_bucket` with no
   `CreateBucketConfiguration`, which real AWS S3 rejects for any region
-  other than `us-east-1` — including `eu-west-2`, this app's own default
-  region (see `app/services/storage.py`). What's still not proven: moto
-  emulates AWS's behavior, not any specific S3-compatible service's —
-  MinIO in particular is known to be lenient about exactly the kind of
-  region strictness that bug depended on, which is likely why it would
-  have gone unnoticed there too. Still run it against a real MinIO
-  container (`docker compose up minio`, set `S3_*` env vars) or a real
-  bucket before fully trusting it — only `LocalFilesystemStorage` has
-  been verified against something real, repeatedly, including through
-  the browser.
+  other than `us-east-1` — including `eu-west-2`, this app's own
+  default region (see `app/services/storage.py`).
+  `tests/test_s3_storage_minio.py` closed the next layer — see
+  "Post-Phase-7: S3Storage verified against real MinIO" below. What's
+  still not proven: a real AWS S3 or Cloudflare R2 bucket — only
+  `LocalFilesystemStorage` has been verified against something fully
+  real (production-grade, not local), repeatedly, including through the
+  browser.
 - **Upload processing is synchronous (inside the request), not a
   background job** — a deliberate Phase 2 scope cut, not an oversight:
   a real async pipeline needs a worker process, a job-status API, and a
@@ -2688,12 +2723,11 @@ follow, just as a full page instead of a collapsible per-org panel.
 4. ~~Group-by as a persisted cleaning operation~~ — done, see
    "Post-Phase-7: persisted group-by" above. Every cleaning operation
    the brief named is now built (11 via `_apply_table_transformation`).
-5. Verify `S3Storage` against the real MinIO container in docker-compose,
-   then against a real AWS S3 / R2 bucket, before depending on it
-   anywhere that matters — it's now tested against a mocked S3 API
-   (moto) and a real region-handling bug was caught and fixed that way
-   (see Known limitations), but no real bucket of any kind has received
-   a request yet.
+5. ~~Verify `S3Storage` against a real MinIO server~~ — done (a real
+   local MinIO instance via Homebrew, not Docker — see "Post-Phase-7:
+   S3Storage verified against real MinIO" above). Still open: a real
+   AWS S3 / R2 bucket — no real bucket of any kind has received a
+   request yet.
 6. ~~Fix the conversation-history replay simplification~~ — done, see
    "Post-Phase-7: conversation history replay fidelity" above.
 7. ~~A distributed lock for the scheduled-report scheduler~~ — done,

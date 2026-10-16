@@ -34,14 +34,15 @@ what matters once you do.
    that in whatever process manager/entrypoint the real deployment uses).
 2. **Real object storage** (S3, R2, or another S3-compatible service).
    Set `S3_ACCESS_KEY`/`S3_SECRET_KEY`/`S3_ENDPOINT_URL`/`S3_BUCKET` —
-   see docs/CHECKLIST.md: this path is now tested against moto's mocked
-   S3 API (which caught and fixed a real region-handling bug in bucket
-   auto-creation), but has still only been exercised for real against
-   local disk storage in this session, not a real bucket. Verify it
-   against MinIO first, then a real provider, before trusting it in
-   production — moto is accurate to AWS's own rules, not necessarily to
-   MinIO's more lenient ones, so a MinIO run is not redundant with the
-   moto tests.
+   see docs/CHECKLIST.md: this path is tested against both moto's
+   mocked S3 API (which caught and fixed a real region-handling bug in
+   bucket auto-creation) and a real local MinIO server
+   (`tests/test_s3_storage_minio.py`, which also confirmed MinIO is
+   genuinely more lenient than AWS about that same region rule, not
+   just assumed to be). Still verify against your actual production
+   provider (AWS S3, R2, etc.) before trusting it there — only MinIO
+   has been exercised for real so far, and AWS is the strict one moto
+   emulates, not MinIO.
 3. **A real `JWT_SECRET`.** The default is an insecure placeholder — the
    app will run with it, which is exactly the problem; generate one
    (`python -c "import secrets; print(secrets.token_urlsafe(64))"`) and
