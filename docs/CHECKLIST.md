@@ -256,8 +256,12 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   `simple_forecast` is an explicit linear-trend baseline (not
   seasonality-aware, documented in its own output as a caveat) — the
   brief's "appropriate forecasting libraries" (statsmodels etc.) aren't
-  used. Date parsing for analytics tools supports 4 common formats via
-  regex, not a general date parser.
+  used.
+- ✅⚠️ **Date parsing for analytics tools** — was 4 strptime formats
+  (not actually regex, despite this bullet previously saying so), now
+  11, see "Post-Phase-7: written-month date formats for analytics
+  tools" below. Still not a general date parser — a fixed format list,
+  same approach as before, just longer.
 
 ## Phase 4 — Commercial SaaS
 
@@ -2399,6 +2403,43 @@ trusting the feature's name.
   correctly fell back to the JSON view rather than a broken or
   misleading chart — proving the dispatch's fallback path works
   end-to-end, not just in the unit tests.
+
+## Post-Phase-7: written-month date formats for analytics tools
+
+Closes one half of the Phase 3 "statistical rigor gaps" bullet — date
+parsing specifically, not the separate (larger, model-choice) forecast
+seasonality gap, which stays open.
+
+- ✅ **`app/services/analytics.py`'s `_DATE_FORMATS`** grew from 4 to
+  11: added `%Y/%m/%d` (unambiguous, same year-first logic as the
+  existing ISO format) plus six written-month formats (`15 March
+  2026`, `15 Mar 2026`, `March 15, 2026`, `Mar 15, 2026`, `March 15
+  2026`, `Mar 15 2026`). Deliberately scoped to formats with **no
+  DD/MM-vs-MM/DD ambiguity** — a month name can't be mistaken for a day
+  number, unlike the existing numeric slash/dash formats (which already
+  accept that ambiguity, trying DD/MM first) — so this doesn't carry
+  the silent-misinterpretation risk `profiling.py`'s numeric-text
+  heuristic deliberately avoids by not auto-converting.
+  Case-insensitive by Python's own `strptime` behavior (confirmed:
+  `%b`/`%B` match "mar"/"MARCH" equally), verified directly rather than
+  assumed.
+- ✅ Purely additive to the format list (appended, not reordered), so
+  no string that already parsed under the first 4 formats could start
+  matching a different one — confirmed by the full suite still passing
+  unmodified (293/293 before this round's 20 new tests).
+- ✅ Automated backend tests: 313/313 passing (20 new,
+  `tests/test_date_parsing.py` — direct unit tests of
+  `_parse_date_cell`, parametrized over all 13 now-supported formats
+  plus 5 cases that should still correctly return `None` rather than
+  raising, e.g. an ordinal "15th of March 2026" or an invalid month).
+- ✅ **Verified live against a real running server**: uploaded a real
+  CSV with four rows in four different written-month formats (`15
+  January 2026`, `February 10, 2026`, `5 Mar 2026`, `Apr 20 2026`) and
+  ran the real `time_trend` tool against it through
+  `POST /dataset-tables/{id}/analyze` — `rows_excluded_unparseable_date:
+  0` and all four rows landed in the correct month buckets
+  (2026-01 through 2026-04) with the right summed values. Before this
+  change all four would have been silently excluded.
 
 ## Known limitations in what's built
 

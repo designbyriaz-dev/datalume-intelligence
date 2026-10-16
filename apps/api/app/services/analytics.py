@@ -17,7 +17,24 @@ from typing import Any
 
 import polars as pl
 
-_DATE_FORMATS = ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"]
+_DATE_FORMATS = [
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+    "%m/%d/%Y",
+    "%d-%m-%Y",
+    "%Y/%m/%d",
+    # Written-month formats — unlike the slash/dash numeric formats above,
+    # these have no DD/MM-vs-MM/DD ambiguity (a month name can't be
+    # mistaken for a day number), so adding them doesn't carry the same
+    # silent-misinterpretation risk documented for profiling.py's
+    # numeric-text heuristic.
+    "%d %B %Y",  # 15 March 2026
+    "%d %b %Y",  # 15 Mar 2026
+    "%B %d, %Y",  # March 15, 2026
+    "%b %d, %Y",  # Mar 15, 2026
+    "%B %d %Y",  # March 15 2026
+    "%b %d %Y",  # Mar 15 2026
+]
 _ISO_LIKE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
