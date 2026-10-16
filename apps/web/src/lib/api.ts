@@ -495,6 +495,7 @@ export interface AuditLogEntry {
   id: string;
   event_type: string;
   actor_user_id: string | null;
+  organization_id: string | null;
   workspace_id: string | null;
   created_at: string;
   event_metadata: Record<string, unknown>;
@@ -579,6 +580,8 @@ export const api = {
 
   getOrganizationAuditLog: (token: string, organizationId: string) =>
     request<AuditLogEntry[]>(`/api/v1/organizations/${organizationId}/audit-log`, {}, token),
+
+  getMyAuditLog: (token: string) => request<AuditLogEntry[]>("/api/v1/users/me/audit-log", {}, token),
 
   me: (token: string) => request<User>("/api/v1/users/me", {}, token),
 

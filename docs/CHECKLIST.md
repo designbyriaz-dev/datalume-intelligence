@@ -2520,7 +2520,10 @@ closed in earlier rounds still. (The same audit also turned up
 `/ai-conversations/{id}`, `/datasets/{id}/conversations`, and
 `/users/me/audit-log` with no frontend trace either — flagged, not
 built here; each is a smaller, more self-contained addition than this
-one, worth a future round.)
+one, worth a future round. `/users/me/audit-log` was picked up in the
+very next round — see "Post-Phase-7: personal activity log UI" below —
+leaving the two AI-conversation-history endpoints as the remaining
+flagged gap.)
 
 - ✅ **`UserOut` (`app/schemas/user.py`) now exposes
   `is_platform_admin`** on `/users/me` — the one piece of this field
@@ -2560,6 +2563,42 @@ one, worth a future round.)
   event with the real `returned_count` — not just that the page showed
   data, but that the access-logging the backend promises actually fired
   from a real page view, not only from a test client.
+
+## Post-Phase-7: personal activity log UI
+
+Closes `/users/me/audit-log`, the second item flagged by the backend
+route ↔ frontend call audit above — a user's own login/registration/
+API-key-change history, already fully built and tested, with no page
+to view it on. Smaller and more self-contained than the admin
+dashboard, as expected: the org audit log UI already existed
+(`apps/web/src/app/dashboard/organizations/page.tsx`) as a pattern to
+follow, just as a full page instead of a collapsible per-org panel.
+
+- ✅ **New `/dashboard/activity` page**, linked from the dashboard's
+  existing Organizations/API keys/Upgrade-plan row. Reverse-chronological
+  list of the caller's own `AuditLogEntry` rows (`event_type`,
+  timestamp) — no new backend endpoint needed, `GET /users/me/audit-log`
+  already existed and was already tested.
+- ✅ **A real frontend/backend type drift fixed in passing**:
+  `apps/web/src/lib/api.ts`'s `AuditLogEntry` interface was missing
+  `organization_id`, which `AuditLogOut` (the backend schema) has
+  always returned.
+- ✅ **`humanizeEventType`** (new, `apps/web/src/lib/format.ts`): turns
+  a dotted/underscored event-type identifier (`admin.user_data_accessed`,
+  `auth_login_failed`) into plain words for display — extracted as a
+  pure function rather than kept page-local specifically so it could be
+  unit tested, same reasoning as `formatBytes` the round before.
+- ✅ Automated frontend tests: 36/36 passing (3 new, in
+  `lib/format.test.ts`, covering dot-separated, underscore-separated,
+  and separator-free event type strings).
+- ✅ **Verified live against a real running server**: registered a
+  real account (real `auth.user_registered` + `auth.login_succeeded`
+  events), opened `/dashboard/activity` and confirmed both rendered as
+  "Auth User Registered" / "Auth Login Succeeded" in the correct
+  reverse-chronological order: then created a real API key through the
+  existing API keys page and confirmed the real `api_key.created` event
+  appeared at the top of the list on a fresh load — not a canned fixture,
+  an event this session's own actions in the real browser actually wrote.
 
 ## Known limitations in what's built
 

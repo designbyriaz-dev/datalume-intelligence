@@ -18,3 +18,10 @@ export function formatBytes(bytes: number): string {
   const value = bytes / 1024 ** exponent;
   return `${exponent === 0 ? value : value.toFixed(1)} ${BYTE_UNITS[exponent]}`;
 }
+
+// Audit log event_type strings are dotted/underscored identifiers
+// (e.g. "admin.user_data_accessed", "auth_login_failed") — this turns
+// them into plain words for display, left for the caller to capitalize.
+export function humanizeEventType(eventType: string): string {
+  return eventType.replace(/[._]/g, " ");
+}

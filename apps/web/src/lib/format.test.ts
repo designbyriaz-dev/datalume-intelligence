@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { daysUntil, formatBytes, resetCountdownLabel } from "./format";
+import { daysUntil, formatBytes, humanizeEventType, resetCountdownLabel } from "./format";
 
 const FIXED_NOW = new Date("2026-03-15T12:00:00.000Z");
 
@@ -73,5 +73,19 @@ describe("formatBytes", () => {
   it("does not overflow past the largest supported unit (caps at TB)", () => {
     const hugeValue = 1024 ** 5; // 1 petabyte's worth of bytes
     expect(formatBytes(hugeValue)).toBe("1024.0 TB");
+  });
+});
+
+describe("humanizeEventType", () => {
+  it("replaces dots with spaces", () => {
+    expect(humanizeEventType("admin.user_data_accessed")).toBe("admin user data accessed");
+  });
+
+  it("replaces underscores with spaces", () => {
+    expect(humanizeEventType("auth_login_failed")).toBe("auth login failed");
+  });
+
+  it("leaves an event type with no separators unchanged", () => {
+    expect(humanizeEventType("login")).toBe("login");
   });
 });
