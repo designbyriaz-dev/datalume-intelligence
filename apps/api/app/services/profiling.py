@@ -42,6 +42,12 @@ class ColumnProfile:
     sample_values: list[Any]
     stats: dict[str, Any] = field(default_factory=dict)
     flags: list[str] = field(default_factory=list)  # e.g. "numeric_stored_as_text"
+    # Subset of null_count: cells that held a real, non-blank value in the
+    # source file but failed to coerce into this column's inferred type
+    # (e.g. "garbage" in an otherwise-integer column). Distinct from a cell
+    # that was genuinely blank — see _detect_coercion_failures below.
+    invalid_count: int = 0
+    invalid_ratio: float = 0.0
 
 
 @dataclass
@@ -84,7 +90,7 @@ def _sniff_delimiter(sample: str) -> str:
         return best if counts[best] > 0 else ","
 
 
-def parse_csv(content: bytes) -> dict[str, pl.DataFrame]:
+def parse_csv(content: bytes) -> tuple[dict[str, pl.DataFrame], dict[str, dict[str, int]]]:
     text = _decode_csv_bytes(content)
     delimiter = _sniff_delimiter(text[:8192])
 
@@ -109,7 +115,47 @@ def parse_csv(content: bytes) -> dict[str, pl.DataFrame]:
     if df.width == 0:
         raise ParsingError("CSV file has no columns.")
 
-    return {"Sheet1": df}
+    invalid_counts = _detect_coercion_failures(text, delimiter, df)
+
+    return {"Sheet1": df}, {"Sheet1": invalid_counts}
+
+
+def _detect_coercion_failures(text: str, delimiter: str, typed_df: pl.DataFrame) -> dict[str, int]:
+    """`ignore_errors=True` above silently nulls any cell that doesn't fit
+    its column's inferred type, with no record of whether that cell was
+    genuinely blank in the file or held a real value that failed to parse
+    (e.g. "garbage" in an otherwise-integer column). Both become
+    indistinguishable nulls, reported only as "missing".
+
+    To recover the distinction, re-read the same CSV with every column
+    forced to text (so nothing can fail to parse) and compare: a cell
+    that's null in the typed read but non-blank in the text read was an
+    invalid value, not a missing one."""
+    try:
+        raw_df = pl.read_csv(
+            io.StringIO(text),
+            separator=delimiter,
+            schema_overrides={col: pl.Utf8 for col in typed_df.columns},
+            n_rows=MAX_PROFILED_ROWS,
+        )
+    except Exception:
+        # No safe way to compute the distinction here — leave every null
+        # categorized as "missing" rather than guessing.
+        return {}
+
+    if raw_df.height != typed_df.height:
+        return {}
+
+    invalid_counts: dict[str, int] = {}
+    for col in typed_df.columns:
+        if typed_df[col].dtype == pl.Utf8 or col not in raw_df.columns:
+            continue  # text columns never lose data to coercion
+        raw_blank = raw_df[col].is_null() | (raw_df[col].str.strip_chars() == "")
+        invalid_mask = typed_df[col].is_null() & ~raw_blank
+        count = int(invalid_mask.sum())
+        if count:
+            invalid_counts[col] = count
+    return invalid_counts
 
 
 def list_excel_sheets(content: bytes) -> list[str]:
@@ -143,11 +189,16 @@ def parse_excel(content: bytes) -> dict[str, pl.DataFrame]:
     return tables
 
 
-def parse_upload(extension: str, content: bytes) -> dict[str, pl.DataFrame]:
+def parse_upload(extension: str, content: bytes) -> tuple[dict[str, pl.DataFrame], dict[str, dict[str, int]]]:
     if extension == ".csv":
         return parse_csv(content)
     if extension == ".xlsx":
-        return parse_excel(content)
+        # Excel cells arrive already typed by the spreadsheet app (a number
+        # cell is never a string that failed to parse), so there's no
+        # equivalent of CSV's ignore_errors silently nulling a real value —
+        # nothing to detect here.
+        tables = parse_excel(content)
+        return tables, {sheet_name: {} for sheet_name in tables}
     raise ParsingError(f"Unsupported extension for parsing: {extension}")
 
 
@@ -183,7 +234,7 @@ def _detect_text_flags(values: list[str]) -> tuple[str | None, list[str]]:
     return None, []
 
 
-def _profile_column(series: pl.Series) -> ColumnProfile:
+def _profile_column(series: pl.Series, invalid_count: int = 0) -> ColumnProfile:
     name = series.name
     total = len(series)
     null_count = series.null_count()
@@ -234,6 +285,8 @@ def _profile_column(series: pl.Series) -> ColumnProfile:
         sample_values=[_jsonable(v) for v in sample_values],
         stats={k: _jsonable(v) for k, v in stats.items()},
         flags=flags,
+        invalid_count=invalid_count,
+        invalid_ratio=round(invalid_count / total, 4) if total else 0.0,
     )
 
 
@@ -259,12 +312,15 @@ def _compute_quality_score(
     return round(max(0.0, min(100.0, score)), 1)
 
 
-def profile_table(sheet_name: str, df: pl.DataFrame) -> TableProfile:
+def profile_table(
+    sheet_name: str, df: pl.DataFrame, invalid_value_counts: dict[str, int] | None = None
+) -> TableProfile:
     row_count = df.height
     column_count = df.width
     duplicate_row_count = row_count - df.unique().height if row_count else 0
+    invalid_value_counts = invalid_value_counts or {}
 
-    columns = [_profile_column(df[col]) for col in df.columns]
+    columns = [_profile_column(df[col], invalid_value_counts.get(col, 0)) for col in df.columns]
 
     issues: list[DataQualityIssue] = []
     for col in columns:
@@ -285,6 +341,18 @@ def profile_table(sheet_name: str, df: pl.DataFrame) -> TableProfile:
             issues.append(
                 DataQualityIssue(
                     "info", "missing_values", col.name, f"{col.null_ratio:.0%} of values are missing."
+                )
+            )
+
+        if col.invalid_count > 0:
+            issues.append(
+                DataQualityIssue(
+                    "warning",
+                    "invalid_values",
+                    col.name,
+                    f"{col.invalid_count} value(s) ({col.invalid_ratio:.0%}) don't match this column's "
+                    f"{col.inferred_type} type and were treated as missing, rather than being blank in "
+                    "the source file.",
                 )
             )
 

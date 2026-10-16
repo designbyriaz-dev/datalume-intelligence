@@ -85,6 +85,61 @@ async def test_upload_csv_profiles_correctly(client: AsyncClient) -> None:
     assert "missing_values" in issue_types
 
 
+def _build_invalid_values_csv() -> bytes:
+    # Polars infers a CSV column's dtype from only the first 10,000 rows
+    # (profiling.py's infer_schema_length); ignore_errors=True then nulls
+    # any *later* row that doesn't fit that inferred type, rather than
+    # widening the column to text. So reproducing that coercion-failure
+    # path (as opposed to a column Polars decides is text from the start)
+    # genuinely requires a file bigger than that sample window — this
+    # mirrors a real large export with a row beyond that window that holds
+    # a non-numeric value in an otherwise-numeric column.
+    lines = ["name,score"]
+    for i in range(10_049):
+        lines.append(f"row{i},{i}")
+    lines.append("garbage_row,garbage")  # non-blank, fails to parse as int -> invalid
+    lines.append("blank_row,")  # genuinely blank -> missing, not invalid
+    return ("\n".join(lines) + "\n").encode()
+
+
+async def test_upload_distinguishes_invalid_values_from_missing(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "invalidvalues@example.com")
+    workspace_id = await _create_personal_workspace(client, token)
+
+    files = {"file": ("scores.csv", _build_invalid_values_csv(), "text/csv")}
+    resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets",
+        data={"name": "Scores"},
+        files=files,
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    profile = resp.json()["tables"][0]["profile"]
+    columns_by_name = {c["name"]: c for c in profile["columns"]}
+
+    score = columns_by_name["score"]
+    assert score["inferred_type"] == "integer"
+    # Both the "garbage" row and the blank row become nulls, but only the
+    # one that held a real, non-blank value should be reported as invalid.
+    assert score["null_count"] == 2
+    assert score["invalid_count"] == 1
+
+    issue_types_for_score = {
+        i["issue_type"] for i in profile["issues"] if i["column"] == "score"
+    }
+    assert "invalid_values" in issue_types_for_score
+    assert "missing_values" in issue_types_for_score
+
+    invalid_issue = next(i for i in profile["issues"] if i["issue_type"] == "invalid_values")
+    assert invalid_issue["column"] == "score"
+    assert invalid_issue["severity"] == "warning"
+
+    # "name" has no missing or invalid values at all.
+    name = columns_by_name["name"]
+    assert name["null_count"] == 0
+    assert name["invalid_count"] == 0
+
+
 async def test_upload_rejects_disguised_file(client: AsyncClient) -> None:
     token = await _register_and_login(client, "owner2@example.com")
     workspace_id = await _create_personal_workspace(client, token)

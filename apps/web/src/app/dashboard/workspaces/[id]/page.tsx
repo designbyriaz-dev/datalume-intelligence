@@ -1550,6 +1550,7 @@ function DatasetCard({
                     <th className="pr-4 py-1">Column</th>
                     <th className="pr-4 py-1">Type</th>
                     <th className="pr-4 py-1">Missing</th>
+                    <th className="pr-4 py-1">Invalid</th>
                     <th className="pr-4 py-1">Distinct</th>
                     <th className="pr-4 py-1">Flags</th>
                   </tr>
@@ -1565,6 +1566,15 @@ function DatasetCard({
                         )}
                       </td>
                       <td className="pr-4 py-1">{(col.null_ratio * 100).toFixed(0)}%</td>
+                      <td className="pr-4 py-1">
+                        {col.invalid_count > 0 ? (
+                          <span className="font-medium text-amber-700 dark:text-amber-400">
+                            {col.invalid_count} ({(col.invalid_ratio * 100).toFixed(0)}%)
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">–</span>
+                        )}
+                      </td>
                       <td className="pr-4 py-1">{col.distinct_count}</td>
                       <td className="pr-4 py-1 text-slate-500">{col.flags.join(", ")}</td>
                     </tr>

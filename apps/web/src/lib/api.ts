@@ -100,6 +100,8 @@ export interface ColumnProfile {
   sample_values: unknown[];
   stats: Record<string, unknown>;
   flags: string[];
+  invalid_count: number;
+  invalid_ratio: number;
 }
 
 export interface DataQualityIssue {

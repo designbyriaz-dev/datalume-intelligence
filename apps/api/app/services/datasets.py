@@ -70,11 +70,14 @@ async def ingest_upload(
         raise DatasetServiceError(str(exc)) from exc
 
     try:
-        tables = parse_upload(validated.extension, validated.content)
+        tables, invalid_value_counts = parse_upload(validated.extension, validated.content)
     except ParsingError as exc:
         raise DatasetServiceError(str(exc)) from exc
 
-    profiles = {sheet_name: profile_table(sheet_name, df) for sheet_name, df in tables.items()}
+    profiles = {
+        sheet_name: profile_table(sheet_name, df, invalid_value_counts.get(sheet_name))
+        for sheet_name, df in tables.items()
+    }
 
     if dataset is None:
         dataset = Dataset(workspace_id=workspace_id, name=dataset_name, created_by_user_id=user_id)

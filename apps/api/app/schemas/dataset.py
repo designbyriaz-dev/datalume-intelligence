@@ -15,6 +15,10 @@ class ColumnProfileOut(BaseModel):
     sample_values: list[Any]
     stats: dict[str, Any]
     flags: list[str]
+    # Defaults keep this backwards-compatible with profile JSON persisted
+    # before this field existed.
+    invalid_count: int = 0
+    invalid_ratio: float = 0.0
 
 
 class DataQualityIssueOut(BaseModel):

@@ -139,10 +139,25 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   round, see "Post-Phase-7: persisted group-by" below. This completes
   every cleaning operation the brief's Phase 2 gap list named —
   compare-datasets is covered by Phase 6's version comparison.
-- ⬜ "Detect invalid values" as its own category — right now a value that
-  fails to coerce into a column's majority type becomes a null (reported
-  as "missing"), not a distinct "invalid" flag. Documented as a known
-  simplification in `app/services/profiling.py`.
+- ✅ **"Detect invalid values" as its own category** — a `ColumnProfile`
+  now carries `invalid_count`/`invalid_ratio` alongside `null_count`, and
+  a new `invalid_values` issue type is raised distinct from
+  `missing_values`. The real mechanism this closes: `parse_csv`'s
+  `ignore_errors=True` only silently nulls a cell when it falls outside
+  the first `infer_schema_length` (10,000) rows used to infer that
+  column's type — within that window Polars already widens the column to
+  text if anything doesn't fit, so this specifically catches large
+  exports where a bad value shows up later in the file. Detected by
+  re-reading the same CSV with every column forced to text and comparing:
+  a cell that's null in the typed read but non-blank in the text read is
+  "invalid"; one that's blank in both stays "missing"
+  (`_detect_coercion_failures` in `app/services/profiling.py`). Scoped to
+  CSV only — Excel cells arrive already typed by the spreadsheet app, so
+  there's no equivalent coercion-failure mode to detect there. Verified
+  with a real >10,000-row upload (not just a small in-memory fixture,
+  which Polars would infer as text and never exercise this path) through
+  the real API, and confirmed live in the browser: the workspace page's
+  per-column table shows a distinct "Invalid" count next to "Missing".
 - ⬜ Async/background processing for large files — uploads are processed
   synchronously in the request. Fine for the brief's ~30s small-file
   target; large files will block the request. Redis is in
@@ -2128,6 +2143,16 @@ answers in the existing backend:
   after creation, then both members with correct roles after a direct
   invite, and confirms any member — not just the owner — can read the
   list; a non-member gets 403; an unauthenticated request gets 401).
+
+## Post-Phase-7: detect invalid values as their own category
+
+See the Phase 2 section above (now ✅) for the full description.
+
+- ✅ Automated backend tests: 283/283 passing (1 new,
+  `test_upload_distinguishes_invalid_values_from_missing` in
+  `tests/test_datasets.py` — uses a >10,000-row generated CSV so the
+  real `ignore_errors` coercion-failure path is actually exercised, not
+  a small fixture Polars would just widen to text).
 
 ## Known limitations in what's built
 
