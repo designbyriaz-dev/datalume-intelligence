@@ -257,11 +257,9 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   narrative)" below — proving the pattern works end-to-end against a
   real model; Financial Performance Report and others on the brief's
   list remain unbuilt but would follow the same proven pattern.
-- ⬜ Statistical rigor gaps, documented in `app/services/analytics.py`:
-  `simple_forecast` is an explicit linear-trend baseline (not
-  seasonality-aware, documented in its own output as a caveat) — the
-  brief's "appropriate forecasting libraries" (statsmodels etc.) aren't
-  used.
+- ✅ Statistical rigor — `simple_forecast` now uses `statsmodels`
+  (Holt-Winters seasonal exponential smoothing) as the brief named, see
+  "Post-Phase-7: seasonality-aware forecasting" below.
 - ✅⚠️ **Date parsing for analytics tools** — was 4 strptime formats
   (not actually regex, despite this bullet previously saying so), now
   11, see "Post-Phase-7: written-month date formats for analytics
@@ -3113,6 +3111,76 @@ retention policy) and legal review, not copy I can respectably invent.
   pages resolve (Solutions → Features, FAQ → Solutions, etc.), and
   confirmed the widened NavBar wraps cleanly at a real 375px mobile
   viewport instead of clipping.
+
+## Post-Phase-7: seasonality-aware forecasting
+
+The last remaining self-contained technical gap after a sweep of every
+other `⬜` in this document — the rest are either multi-day projects of
+their own (SCIM, custom roles, a deployment manifest), deployment-
+topology decisions correctly deferred until there's a real topology to
+decide against (the proxy-header and cookie `SameSite` items), or
+blocked on credentials/company information this session doesn't have.
+
+- ✅ **`simple_forecast` now uses Holt-Winters exponential smoothing**
+  (`statsmodels`, additive trend + additive seasonal) instead of always
+  falling back to the old linear-trend baseline — picked up whenever
+  there's enough monthly history to fit one reliably (at least 2 full
+  years), and falls back to the exact same OLS linear-trend baseline as
+  before otherwise: always the case for `period="year"` (no shorter
+  cycle exists to detect), under 2 years of monthly data, or if the
+  seasonal fit fails to converge on real data (caught and handled, not
+  a 500). Additive, not multiplicative, seasonality on purpose — stays
+  well-defined for data that crosses or sits at zero (net profit,
+  arrears cleared to nil), which a multiplicative model can't handle.
+- ✅ **Confidence bounds via Monte Carlo simulation**
+  (`fit.simulate(...)`, 1000 repetitions, 2.5th/97.5th percentiles) —
+  `statsmodels`' `ExponentialSmoothingResults` has no `get_prediction`
+  (confirmed by trying it directly), unlike other statsmodels model
+  classes, so this is the library's own documented way to get interval
+  estimates for this model. **Deterministic on purpose**: a fixed seed
+  (`np.random.default_rng(1245)`), not wall-clock entropy, so the same
+  input data always produces the same bounds — this module's own
+  docstring promises every number here is "a reproducible calculation,"
+  and that still has to be true for a method that's internally
+  stochastic.
+- ✅ **New dependencies**: `statsmodels==0.15.0` and `numpy==2.5.4`
+  added to `requirements.txt` — neither existed in this project before
+  (no numpy/scipy/pandas either, all three come in as statsmodels'
+  transitive dependencies).
+- ✅ **`simple_forecast`'s tool description updated**
+  (`app/services/tools.py`) — used to tell the AI model "not
+  seasonality-aware," which stopped being true; now describes both the
+  seasonal path and the linear fallback condition, so the AI analyst's
+  own explanation of a forecast can be accurate.
+- ✅ Automated backend tests: 349/349 passing (6 new, in
+  `tests/test_forecasting.py`, calling `simple_forecast` directly
+  rather than through the API, same pattern `test_date_parsing.py`
+  already uses for this module) — the linear fallback under 2 years of
+  monthly data, the seasonal path triggering at exactly 2 years, a
+  3-year strongly-seasonal synthetic dataset where the forecast's
+  peak-to-trough range actually tracks the real seasonal swing (not
+  just "a seasonal method was picked"), `period="year"` never using the
+  seasonal path regardless of history length, determinism (identical
+  output across two calls on identical input), and the existing
+  minimum-history rejection still working. The pre-existing
+  `test_analysis.py` forecast test (8 months of data, so it stays on
+  the linear path) and every other test in the suite passed unchanged.
+- ✅ **Verified live against a real running server**: built a real
+  36-month synthetic CSV with a clean seasonal swing and an upward
+  trend, uploaded it, and called the real `/analyze` endpoint directly.
+  Confirmed `method: "holt_winters_additive"` was selected and
+  hand-verified the forecast by the same formula the data was generated
+  from — January 2026's predicted value (13600.0) and February 2026's
+  (13950.0) both matched the hand-computed expected values exactly.
+  Then asked the real AI analyst (a real Anthropic API call, not a
+  scripted fake) "Forecast our revenue for the next 6 months based on
+  historical trends" against the same dataset — it called
+  `simple_forecast`, correctly described using "Holt-Winters
+  exponential smoothing with a 12-month seasonal cycle," correctly
+  characterised the pattern (dips mid-year, peaks early, ~$1,200/year
+  growth), and repeated the forecast's own honest caveat about not
+  anticipating genuine business changes — all generated from the real
+  tool result, not invented.
 
 ## Known limitations in what's built
 

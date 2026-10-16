@@ -15,7 +15,9 @@ import datetime as dt
 import re
 from typing import Any
 
+import numpy as np
 import polars as pl
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 _DATE_FORMATS = [
     "%Y-%m-%d",
@@ -280,27 +282,17 @@ def time_trend(
     }
 
 
-def simple_forecast(
-    df: pl.DataFrame, date_column: str, value_column: str, periods_ahead: int = 3, period: str = "month"
-) -> dict[str, Any]:
-    """A deliberately simple linear-trend baseline (ordinary least squares
-    over period-aggregated history) — NOT ARIMA/Prophet/anything
-    seasonality-aware. Good enough to show direction and a naive
-    uncertainty band; documented as a baseline so it's never mistaken for
-    more than it is. See docs/CHECKLIST.md."""
-    if periods_ahead < 1 or periods_ahead > 24:
-        raise AnalyticsError("periods_ahead must be between 1 and 24.")
+_SEASONAL_PERIODS = {"month": 12}  # "year" has no shorter cycle to detect
+_MIN_SEASONAL_CYCLES = 2  # need this many full cycles before trusting a seasonal fit
+_FORECAST_SIMULATIONS = 1000
+_FORECAST_RNG_SEED = 1245  # fixed, not wall-clock entropy — see _seasonal_forecast
 
-    trend = time_trend(df, date_column, value_column, period=period, agg="sum")
-    points = trend["points"]
-    if len(points) < 3:
-        raise AnalyticsError(
-            f"Need at least 3 historical {period} periods to forecast; found {len(points)}."
-        )
 
-    xs = list(range(len(points)))
-    ys = [p["value"] for p in points]
-
+def _linear_trend_forecast(ys: list[float], periods_ahead: int) -> dict[str, Any]:
+    """Ordinary least squares over period-aggregated history. The
+    fallback whenever there isn't enough history for a seasonal fit —
+    always correct to use, never fails to converge."""
+    xs = list(range(len(ys)))
     n = len(xs)
     mean_x = sum(xs) / n
     mean_y = sum(ys) / n
@@ -312,32 +304,132 @@ def simple_forecast(
     residuals = [y - (slope * x + intercept) for x, y in zip(xs, ys)]
     residual_std = (sum(r**2 for r in residuals) / n) ** 0.5
 
-    last_key = points[-1]["period"]
-    forecast_points = []
+    predicted, lower, upper = [], [], []
     for step in range(1, periods_ahead + 1):
         x = n - 1 + step
-        predicted = slope * x + intercept
-        forecast_points.append(
-            {
-                "period": _advance_period(last_key, step, period),
-                "predicted_value": round(predicted, 4),
-                "lower_bound": round(predicted - 1.96 * residual_std, 4),
-                "upper_bound": round(predicted + 1.96 * residual_std, 4),
-            }
+        value = slope * x + intercept
+        predicted.append(value)
+        lower.append(value - 1.96 * residual_std)
+        upper.append(value + 1.96 * residual_std)
+
+    return {
+        "method": "linear_trend_ols",
+        "predicted": predicted,
+        "lower": lower,
+        "upper": upper,
+        "residual_std_dev": residual_std,
+        "caveat": (
+            "Simple linear-trend baseline. Does not account for seasonality "
+            "or external factors. Treat as directional, not precise."
+        ),
+    }
+
+
+def _seasonal_forecast(ys: list[float], periods_ahead: int, seasonal_periods: int) -> dict[str, Any]:
+    """Holt-Winters (additive trend + additive seasonal) exponential
+    smoothing via statsmodels — picks up a repeating seasonal pattern the
+    linear baseline can't. Additive, not multiplicative, seasonality, so
+    it stays well-defined for data that crosses or sits at zero (net
+    profit, arrears cleared to nil, etc.) — multiplicative models break
+    down on exactly that data. Raises on any fit/simulation failure so
+    the caller can fall back to the linear baseline rather than surface
+    a 500 for an edge case (e.g. a long flat run with ~zero variance)."""
+    model = ExponentialSmoothing(
+        np.asarray(ys, dtype=float),
+        trend="add",
+        seasonal="add",
+        seasonal_periods=seasonal_periods,
+        initialization_method="estimated",
+    )
+    fit = model.fit()
+
+    predicted = np.asarray(fit.forecast(periods_ahead), dtype=float)
+    # A fixed seed, not wall-clock entropy, so the same historical data
+    # always produces the same bounds — every other tool in this module
+    # is a reproducible calculation, not a one-off random sample, and
+    # this one stays that way too.
+    simulations = fit.simulate(
+        nsimulations=periods_ahead,
+        repetitions=_FORECAST_SIMULATIONS,
+        rng=np.random.default_rng(_FORECAST_RNG_SEED),
+    )
+    lower = np.percentile(simulations, 2.5, axis=1)
+    upper = np.percentile(simulations, 97.5, axis=1)
+
+    if not (np.all(np.isfinite(predicted)) and np.all(np.isfinite(lower)) and np.all(np.isfinite(upper))):
+        raise AnalyticsError("Seasonal model did not converge to a finite forecast.")
+
+    return {
+        "method": "holt_winters_additive",
+        "predicted": [float(v) for v in predicted],
+        "lower": [float(v) for v in lower],
+        "upper": [float(v) for v in upper],
+        "residual_std_dev": float(np.std(fit.resid)),
+        "caveat": (
+            f"Holt-Winters exponential smoothing with a {seasonal_periods}-period seasonal "
+            "cycle, fit to the full history shown. Captures a repeating seasonal pattern and "
+            "trend, but still assumes that pattern continues — a genuine change in the "
+            "underlying business (a new strategy, a one-off event) won't be anticipated."
+        ),
+    }
+
+
+def simple_forecast(
+    df: pl.DataFrame, date_column: str, value_column: str, periods_ahead: int = 3, period: str = "month"
+) -> dict[str, Any]:
+    """Forecasts periods_ahead steps forward from the period-aggregated
+    history. Uses Holt-Winters seasonal exponential smoothing
+    (statsmodels) when there's enough history to fit one reliably — at
+    least two full seasonal cycles — and falls back to an ordinary-
+    least-squares linear-trend baseline otherwise: always the case for
+    period="year" (no shorter cycle to detect), monthly data under two
+    years, or if the seasonal model fails to converge on real data.
+    Either way, every number is a reproducible calculation from the same
+    input, not a cached or randomly-sampled estimate — see this module's
+    own docstring."""
+    if periods_ahead < 1 or periods_ahead > 24:
+        raise AnalyticsError("periods_ahead must be between 1 and 24.")
+
+    trend = time_trend(df, date_column, value_column, period=period, agg="sum")
+    points = trend["points"]
+    if len(points) < 3:
+        raise AnalyticsError(
+            f"Need at least 3 historical {period} periods to forecast; found {len(points)}."
         )
+
+    ys = [p["value"] for p in points]
+    seasonal_periods = _SEASONAL_PERIODS.get(period)
+    seasonal_eligible = seasonal_periods is not None and len(ys) >= _MIN_SEASONAL_CYCLES * seasonal_periods
+
+    result = None
+    if seasonal_eligible:
+        try:
+            result = _seasonal_forecast(ys, periods_ahead, seasonal_periods)
+        except Exception:
+            result = None  # fall back to the always-reliable linear baseline below
+    if result is None:
+        result = _linear_trend_forecast(ys, periods_ahead)
+
+    last_key = points[-1]["period"]
+    forecast_points = [
+        {
+            "period": _advance_period(last_key, step, period),
+            "predicted_value": round(result["predicted"][step - 1], 4),
+            "lower_bound": round(result["lower"][step - 1], 4),
+            "upper_bound": round(result["upper"][step - 1], 4),
+        }
+        for step in range(1, periods_ahead + 1)
+    ]
 
     return {
         "date_column": date_column,
         "value_column": value_column,
         "period": period,
-        "method": "linear_trend_ols",
+        "method": result["method"],
         "historical_points": points,
         "forecast_points": forecast_points,
-        "residual_std_dev": round(residual_std, 4),
-        "caveat": (
-            "Simple linear-trend baseline. Does not account for seasonality "
-            "or external factors. Treat as directional, not precise."
-        ),
+        "residual_std_dev": round(result["residual_std_dev"], 4),
+        "caveat": result["caveat"],
     }
 
 

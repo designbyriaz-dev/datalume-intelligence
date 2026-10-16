@@ -147,8 +147,10 @@ TOOLS: dict[str, ToolSpec] = {
     "simple_forecast": ToolSpec(
         name="simple_forecast",
         description=(
-            "Project a numeric column forward using a simple linear-trend baseline over "
-            "historical month/year periods. Not seasonality-aware — directional only."
+            "Project a numeric column forward over historical month/year periods. Uses "
+            "seasonality-aware Holt-Winters exponential smoothing when there are at least 2 "
+            "full years of monthly history, otherwise falls back to a linear-trend baseline — "
+            "directional only in that case."
         ),
         parameters=[
             ToolParameter("date_column", "string", "The date column (may be stored as text)."),
