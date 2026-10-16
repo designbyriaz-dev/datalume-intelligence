@@ -19,7 +19,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return _pwd_context.verify(plain_password, hashed_password)
 
 
-def _create_token(subject: str, expires_delta: timedelta, token_type: Literal["access", "refresh"]) -> str:
+def _create_token(
+    subject: str, expires_delta: timedelta, token_type: Literal["access", "refresh", "mfa_challenge"]
+) -> str:
     now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
         "sub": subject,
@@ -36,6 +38,16 @@ def create_access_token(user_id: str) -> str:
 
 def create_refresh_token(user_id: str) -> str:
     return _create_token(user_id, timedelta(minutes=settings.refresh_token_expire_minutes), "refresh")
+
+
+def create_mfa_challenge_token(user_id: str) -> str:
+    """Issued by /auth/login in place of access+refresh tokens when the
+    account has MFA enabled — proves the password check already passed,
+    without itself being usable as a credential for any other endpoint
+    (get_current_user only accepts type == "access"). Short-lived (5
+    minutes) since it's the thing an attacker who already has the
+    password would try to replay against /auth/mfa/verify."""
+    return _create_token(user_id, timedelta(minutes=5), "mfa_challenge")
 
 
 def decode_token(token: str) -> dict[str, Any] | None:

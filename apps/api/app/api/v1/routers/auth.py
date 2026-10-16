@@ -1,8 +1,10 @@
+import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_email_sender_dep, get_email_sender_optional_dep, rate_limit_dependency
+from app.api.deps import get_current_user, get_email_sender_dep, get_email_sender_optional_dep, rate_limit_dependency
 from app.core.config import get_settings
 from app.core.cookies import (
     CSRF_HEADER,
@@ -14,6 +16,7 @@ from app.core.cookies import (
 )
 from app.core.security import (
     create_access_token,
+    create_mfa_challenge_token,
     create_refresh_token,
     decode_token,
     hash_password,
@@ -26,6 +29,11 @@ from app.models.user import User
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
+    MfaDisableRequest,
+    MfaEnableRequest,
+    MfaRequiredOut,
+    MfaSetupOut,
+    MfaVerifyRequest,
     RefreshRequest,
     RegisterRequest,
     ResendVerificationRequest,
@@ -45,6 +53,8 @@ from app.services.email_tokens import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+_MFA_ISSUER = "DataLume Intelligence"
+
 # Per-IP request limits on every auth endpoint that doesn't already
 # require a valid credential to reach (refresh excluded — it needs a
 # real refresh token, which is already the gate). Generous enough for
@@ -58,6 +68,10 @@ _verify_email_rate_limit = rate_limit_dependency("auth_verify_email", max_reques
 _resend_verification_rate_limit = rate_limit_dependency("auth_resend_verification", max_requests=5, window_seconds=3600)
 _forgot_password_rate_limit = rate_limit_dependency("auth_forgot_password", max_requests=5, window_seconds=3600)
 _reset_password_rate_limit = rate_limit_dependency("auth_reset_password", max_requests=10, window_seconds=3600)
+# A 6-digit TOTP code is brute-forceable (1 in 1,000,000 per guess) —
+# this is the one unauthenticated MFA endpoint, same threat model as
+# /login, so it gets the same tight per-IP limit.
+_mfa_verify_rate_limit = rate_limit_dependency("auth_mfa_verify", max_requests=10, window_seconds=300)
 
 
 @router.post(
@@ -164,6 +178,23 @@ async def login(payload: LoginRequest, response: Response, db: AsyncSession = De
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")
 
+    if user.mfa_enabled:
+        # Password already verified above — this proves it without
+        # issuing a real access/refresh token yet. The challenge token
+        # can't be used as a bearer credential anywhere else
+        # (get_current_user only accepts type == "access") and expires
+        # in 5 minutes. Audit-logging "login_succeeded" here would be
+        # premature — the login isn't complete until /auth/mfa/verify
+        # actually succeeds, so that event is recorded there instead.
+        challenge_token = create_mfa_challenge_token(user.id)
+        # A Response returned directly bypasses response_model entirely
+        # (FastAPI's documented behavior, already relied on in
+        # organizations.py's invite_member) — needed here since this
+        # branch returns a different shape than TokenResponse.
+        return JSONResponse(
+            content=MfaRequiredOut(challenge_token=challenge_token).model_dump()
+        )
+
     await record_audit_event(db, event_type="auth.login_succeeded", actor_user_id=user.id)
     await db.commit()
 
@@ -180,6 +211,106 @@ async def login(payload: LoginRequest, response: Response, db: AsyncSession = De
     # it anywhere; the httpOnly cookie set above is what it actually
     # relies on for refreshing.
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/mfa/verify", response_model=TokenResponse, dependencies=[Depends(_mfa_verify_rate_limit)])
+async def mfa_verify(
+    payload: MfaVerifyRequest, response: Response, db: AsyncSession = Depends(get_db)
+) -> TokenResponse:
+    """Completes a login that /auth/login paused on mfa_required=True.
+    Takes the short-lived challenge_token from that response plus the
+    6-digit code from the user's authenticator app, and — on success —
+    issues real tokens exactly like a normal login would, including the
+    refresh/CSRF cookies."""
+    invalid_challenge = HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired challenge token")
+
+    decoded = decode_token(payload.challenge_token)
+    if decoded is None or decoded.get("type") != "mfa_challenge":
+        raise invalid_challenge
+
+    user = await db.get(User, decoded.get("sub"))
+    if user is None or not user.is_active or not user.mfa_enabled or not user.mfa_secret:
+        raise invalid_challenge
+
+    # valid_window=1 tolerates the code from one 30s step before/after
+    # now, for clock drift between the server and the user's device —
+    # standard TOTP leniency, not a meaningfully wider guessing window.
+    if not pyotp.TOTP(user.mfa_secret).verify(payload.code, valid_window=1):
+        await record_audit_event(db, event_type="auth.mfa_verify_failed", actor_user_id=user.id)
+        await db.commit()
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect code")
+
+    await record_audit_event(db, event_type="auth.mfa_verify_succeeded", actor_user_id=user.id)
+    await record_audit_event(db, event_type="auth.login_succeeded", actor_user_id=user.id)
+    await db.commit()
+
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token(user.id)
+    set_auth_cookies(
+        response, refresh_token=refresh_token, csrf_token=generate_csrf_token(), settings=get_settings()
+    )
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+@router.post("/mfa/setup", response_model=MfaSetupOut)
+async def mfa_setup(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> MfaSetupOut:
+    """Generates a new TOTP secret and stores it as *pending* —
+    mfa_enabled stays False until /auth/mfa/enable confirms the user
+    actually has it in an authenticator app by producing a correct code
+    from it. Calling this again before enabling simply overwrites the
+    previous pending secret (e.g. the user re-scans after a mistake);
+    it never touches mfa_enabled or an already-active mfa_secret, so
+    accidentally hitting this endpoint can't disable an MFA'd account."""
+    if current_user.mfa_enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "MFA is already enabled on this account.")
+
+    secret = pyotp.random_base32()
+    current_user.mfa_secret = secret
+    await db.commit()
+
+    otpauth_url = pyotp.TOTP(secret).provisioning_uri(name=current_user.email, issuer_name=_MFA_ISSUER)
+    return MfaSetupOut(secret=secret, otpauth_url=otpauth_url)
+
+
+@router.post("/mfa/enable", response_model=UserOut)
+async def mfa_enable(
+    payload: MfaEnableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    if current_user.mfa_enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "MFA is already enabled on this account.")
+    if not current_user.mfa_secret:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Call /auth/mfa/setup first.")
+
+    if not pyotp.TOTP(current_user.mfa_secret).verify(payload.code, valid_window=1):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Incorrect code — check your authenticator app and try again.")
+
+    current_user.mfa_enabled = True
+    await record_audit_event(db, event_type="auth.mfa_enabled", actor_user_id=current_user.id)
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.post("/mfa/disable", response_model=UserOut)
+async def mfa_disable(
+    payload: MfaDisableRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Requires re-entering the account password — not just an already-
+    open session — since disabling MFA is a sensitive, security-reducing
+    action (the same reason most providers gate it the same way)."""
+    if not verify_password(payload.password, current_user.hashed_password):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect password")
+
+    current_user.mfa_enabled = False
+    current_user.mfa_secret = None
+    await record_audit_event(db, event_type="auth.mfa_disabled", actor_user_id=current_user.id)
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
 
 
 @router.post("/refresh", response_model=TokenResponse)

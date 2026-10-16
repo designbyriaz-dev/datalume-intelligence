@@ -47,3 +47,33 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=10, max_length=128)
+
+
+class MfaRequiredOut(BaseModel):
+    """What /auth/login returns instead of TokenResponse when the account
+    has MFA enabled — documented here for OpenAPI, but the endpoint
+    actually returns this as a plain JSONResponse (bypassing
+    response_model=TokenResponse), the same established pattern
+    app/api/v1/routers/organizations.py's invite_member uses for its own
+    second response shape."""
+
+    mfa_required: bool = True
+    challenge_token: str
+
+
+class MfaVerifyRequest(BaseModel):
+    challenge_token: str
+    code: str = Field(min_length=6, max_length=6)
+
+
+class MfaSetupOut(BaseModel):
+    secret: str
+    otpauth_url: str
+
+
+class MfaEnableRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+
+
+class MfaDisableRequest(BaseModel):
+    password: str

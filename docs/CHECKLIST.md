@@ -58,7 +58,8 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
 - ✅ Email verification delivery and password reset — built after Phase
   7, not in this phase's original pass; see the Post-Phase-7
   "transactional email" section below.
-- ⬜ MFA
+- ✅ MFA — TOTP-based, see "Post-Phase-7: MFA (TOTP two-factor
+  authentication)" below.
 - ⬜ Onboarding "what do you want to analyse" flow (industry is currently
   just a dropdown on workspace creation, not a guided first-run flow)
 - ⬜ Full public page set from the brief (Features, How It Works,
@@ -2894,6 +2895,104 @@ against a real model first.
   figures found. The summary also added real analytical framing beyond
   restating numbers — lease-expiry concentration risk and tenant
   concentration risk — exactly what the system prompt asked for.
+
+## Post-Phase-7: MFA (TOTP two-factor authentication)
+
+Closes the last self-contained, no-decisions-needed gap from Phase 1's
+list — picked over the other remaining items (public-page copy needs
+product-owner decisions; SCIM/custom roles/deployment manifest were
+explicitly scoped out as separate substantial projects; Stripe live
+mode, a real S3 bucket, and the Okta/Azure AD tenant are all
+credential-gated, not something to build further right now).
+
+- ✅ **`User.mfa_enabled`/`mfa_secret`** (new columns, migration
+  `6c271b27bbfd`) — `mfa_secret` holds a pending-or-active TOTP secret;
+  `mfa_enabled` only flips to `True` once `/auth/mfa/enable` confirms
+  the user actually has it in an authenticator app (a correct code was
+  produced from it), not merely that setup was requested. **Caught and
+  fixed a real migration bug before it ever ran**: Alembic's
+  autogenerate produced `ADD COLUMN mfa_enabled BOOLEAN NOT NULL` with
+  no default — both Postgres and SQLite reject that against a non-empty
+  table. Added `server_default=sa.false()` (also just the semantically
+  correct value — no pre-existing account could possibly have had MFA,
+  since the feature didn't exist yet) and confirmed live against the
+  real dev database: all 13 existing users got `mfa_enabled=0` cleanly,
+  no failed migration.
+- ✅ **New token type, `mfa_challenge`** (`app/core/security.py`): a
+  third JWT type alongside `access`/`refresh`, 5-minute expiry. Proves
+  the password check already passed without being usable as a bearer
+  credential anywhere else — `get_current_user` only accepts
+  `type == "access"`, confirmed by a dedicated test
+  (`test_mfa_challenge_token_cannot_be_used_as_a_bearer_credential`).
+- ✅ **`POST /auth/login` now branches on `mfa_enabled`**: unchanged for
+  every account without MFA (same `TokenResponse`, same cookies, fully
+  backward compatible — confirmed by the existing 24 auth tests passing
+  untouched). For an MFA'd account, returns `{mfa_required: true,
+  challenge_token}` instead — as a plain `JSONResponse` bypassing
+  `response_model=TokenResponse`, the exact pattern
+  `organizations.py`'s `invite_member` already uses for its own second
+  response shape, so no new FastAPI idiom was introduced.
+- ✅ **Four new endpoints** (`app/api/v1/routers/auth.py`):
+  `POST /auth/mfa/setup` (authenticated, generates a secret, stores it
+  as pending, returns the secret + an `otpauth://` provisioning URL —
+  deliberately no server-side QR image generation or a new `qrcode`
+  dependency; the URL plus the raw secret for manual entry covers every
+  authenticator app without adding one), `POST /auth/mfa/enable`
+  (authenticated, confirms a code against the pending secret),
+  `POST /auth/mfa/disable` (authenticated, requires re-entering the
+  account password — a sensitive, security-*reducing* action, so an
+  already-open session alone isn't enough), and `POST /auth/mfa/verify`
+  (unauthenticated — takes the challenge token + code, issues real
+  tokens on success, rate-limited at the same tightness as `/login`
+  since a 6-digit code is brute-forceable without one). All four new
+  audit event types (`auth.mfa_enabled`, `auth.mfa_disabled`,
+  `auth.mfa_verify_succeeded`, `auth.mfa_verify_failed`) added to
+  `app/services/audit.py`'s `EVENT_TYPES` allowlist first, same
+  discipline as every other audited action in this app.
+- ✅ **New dependency**: `pyotp==2.10.0` (standard Python TOTP library)
+  added to `requirements.txt` — nothing else in the codebase already
+  provided this.
+- ✅ **Frontend**: `api.login` now returns a `TokenResponse | MfaRequired`
+  union (`isMfaRequired` type guard, mirroring the existing
+  `isPendingInvite` pattern on the organizations page);
+  `AuthProvider.login()` detects it and returns `{mfaRequired: true,
+  challengeToken}` instead of setting the session, leaving every
+  non-MFA login path (including `register()`'s internal auto-login call
+  — a brand-new account can never have MFA enabled yet) completely
+  unchanged. `LoginPage` renders a second "Enter your code" step when
+  `login()` reports `mfaRequired`, submitting to the new
+  `completeMfaLogin` → `POST /auth/mfa/verify`. A new
+  `/dashboard/security` page (linked from the dashboard, alongside
+  Organizations/API keys/Activity log) lets a user turn MFA on (setup →
+  show secret + otpauth URL → confirm with a code) or off (re-enter
+  password to confirm) — closely follows the existing API-keys
+  settings page's structure.
+- ✅ Automated backend tests: 343/343 passing (10 new, in the new
+  `tests/test_auth_mfa.py` — setup returns a usable secret/otpauth URL,
+  enable rejects a wrong code and requires setup first, the full
+  login → challenge → verify → real-token flow end to end with a real
+  `pyotp`-generated code, verify rejects a wrong code, a real access
+  token can't be used as a challenge token and vice versa, disable
+  requires the correct password and a wrong one is rejected, enabling
+  twice is rejected, and the verify endpoint genuinely needs no auth
+  header). Confirmed the migration's `server_default` fix was load-
+  bearing by checking it applied against the real dev database with 13
+  pre-existing rows, not just an empty test database.
+- ✅ Frontend: 36/36 passing (one existing test updated — `api.test.ts`
+  asserted directly on `login()`'s old single-shape return; now narrows
+  with `isMfaRequired` first, exactly as real callers must).
+- ✅ **Verified live against a real running server**: enabled MFA on a
+  real account through the real `/dashboard/security` UI — scanned-the-
+  manual-entry-code equivalent (computed a real TOTP code from the
+  displayed secret with `pyotp` standing in for an authenticator app),
+  confirmed the account flipped to "on". Logged out, logged back in
+  with the real password, and confirmed the real login call paused at
+  "Enter your code" instead of reaching the dashboard. Entered a real
+  TOTP code for the current 30-second window and confirmed it completed
+  login and landed on the real dashboard. Tested the disable flow too:
+  a wrong password was rejected with "Incorrect password" shown inline,
+  the correct password disabled it and the page reverted to "off",
+  confirmed by re-reading the real `/users/me` response.
 
 ## Known limitations in what's built
 

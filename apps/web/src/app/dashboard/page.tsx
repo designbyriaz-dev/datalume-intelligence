@@ -101,6 +101,9 @@ export default function DashboardPage() {
               <Link href="/dashboard/activity" className="text-sm text-brand-500 hover:underline">
                 Activity log
               </Link>
+              <Link href="/dashboard/security" className="text-sm text-brand-500 hover:underline">
+                Security
+              </Link>
               <Link href="/pricing" className="text-sm text-brand-500 hover:underline">
                 {subscription.plan_id === "free" ? "Upgrade plan" : "Manage plan"}
               </Link>

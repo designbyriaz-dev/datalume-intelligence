@@ -52,6 +52,10 @@ EVENT_TYPES = {
     "organization.invite_accepted",
     "organization.member_removed",
     "organization.member_role_changed",
+    "auth.mfa_enabled",
+    "auth.mfa_disabled",
+    "auth.mfa_verify_succeeded",
+    "auth.mfa_verify_failed",
 }
 
 

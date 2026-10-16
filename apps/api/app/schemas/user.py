@@ -10,3 +10,4 @@ class UserOut(BaseModel):
     is_active: bool
     is_verified: bool
     is_platform_admin: bool
+    mfa_enabled: bool

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError } from "./api";
+import { api, ApiError, isMfaRequired } from "./api";
 
 // api.ts's internal `request`/`requestMultipart` helpers aren't exported —
 // tested here through real `api.*` methods (login/me/logout/uploadDataset)
@@ -34,6 +34,7 @@ describe("api request()", () => {
       json: () => Promise.resolve({ access_token: "t", refresh_token: "r", token_type: "bearer" }),
     });
     const result = await api.login("a@b.com", "pw");
+    if (isMfaRequired(result)) throw new Error("unexpected mfa_required in this test");
     expect(result.access_token).toBe("t");
   });
 

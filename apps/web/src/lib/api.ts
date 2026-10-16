@@ -75,6 +75,7 @@ export interface User {
   is_active: boolean;
   is_verified: boolean;
   is_platform_admin: boolean;
+  mfa_enabled: boolean;
 }
 
 export interface PlatformStats {
@@ -108,6 +109,20 @@ export interface TokenResponse {
   access_token: string;
   refresh_token: string;
   token_type: string;
+}
+
+export interface MfaRequired {
+  mfa_required: true;
+  challenge_token: string;
+}
+
+export function isMfaRequired(result: TokenResponse | MfaRequired): result is MfaRequired {
+  return "mfa_required" in result;
+}
+
+export interface MfaSetup {
+  secret: string;
+  otpauth_url: string;
 }
 
 export interface Workspace {
@@ -527,10 +542,28 @@ export const api = {
     }),
 
   login: (email: string, password: string) =>
-    request<TokenResponse>("/api/v1/auth/login", {
+    request<TokenResponse | MfaRequired>("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+
+  mfaVerify: (challengeToken: string, code: string) =>
+    request<TokenResponse>("/api/v1/auth/mfa/verify", {
+      method: "POST",
+      body: JSON.stringify({ challenge_token: challengeToken, code }),
+    }),
+
+  mfaSetup: (token: string) => request<MfaSetup>("/api/v1/auth/mfa/setup", { method: "POST" }, token),
+
+  mfaEnable: (token: string, code: string) =>
+    request<User>("/api/v1/auth/mfa/enable", { method: "POST", body: JSON.stringify({ code }) }, token),
+
+  mfaDisable: (token: string, password: string) =>
+    request<User>(
+      "/api/v1/auth/mfa/disable",
+      { method: "POST", body: JSON.stringify({ password }) },
+      token
+    ),
 
   // Relies on the httpOnly refresh_token cookie the backend set on
   // login — there's nothing to pass in the body. The CSRF header is
