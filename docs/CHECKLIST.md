@@ -607,6 +607,9 @@ below for why.
   **Explicitly not included** (no real data source exists for these
   yet, documented in the module's own docstring rather than faked): AI
   API costs, system error rates, support ticket counts.
+  **Had no frontend at all until a later round** — see "Post-Phase-7:
+  admin dashboard UI" below; the "verified live" above meant direct API
+  calls, not a page anyone could actually open.
 - ✅ **Outbound webhooks** (`app/models/webhook.py`, `app/services/webhooks.py`,
   `/webhooks*`): per-workspace subscriptions firing on `dataset.uploaded`
   and `report.generated`, signed with the same HMAC-SHA256 scheme Stripe
@@ -2504,6 +2507,59 @@ scenarios on top of it.
   `POST /saved-scenarios/{id}/run` (200) reproduced the identical
   numbers, then deleted it and confirmed the "Saved scenarios" section
   correctly disappeared once the list was empty again.
+
+## Post-Phase-7: admin dashboard UI
+
+Found by a systematic audit of this session: grepped every backend
+route path against every frontend `request<T>(...)` call in
+`apps/web/src/lib/api.ts`. `/admin/stats` and `/admin/users` (Phase 7,
+tested, "verified live" via direct API calls per the section above)
+had zero frontend trace — same shape of gap as the scenario modeling
+UI closed earlier this round, and the Organizations/Webhooks UI gaps
+closed in earlier rounds still. (The same audit also turned up
+`/ai-conversations/{id}`, `/datasets/{id}/conversations`, and
+`/users/me/audit-log` with no frontend trace either — flagged, not
+built here; each is a smaller, more self-contained addition than this
+one, worth a future round.)
+
+- ✅ **`UserOut` (`app/schemas/user.py`) now exposes
+  `is_platform_admin`** on `/users/me` — the one piece of this field
+  every user is allowed to know about themselves (never about anyone
+  else; `AdminUserOut`, a separate schema already gated behind
+  `require_platform_admin`, is what exposes it for other users). Lets
+  the frontend decide whether to show an "Admin" nav link at all,
+  rather than showing a dead link every non-admin would hit a 403
+  behind.
+- ✅ **New `/dashboard/admin` page**: stat cards for every
+  `PlatformStatsOut` field (storage formatted via a new
+  `apps/web/src/lib/format.ts#formatBytes`, not raw bytes), a
+  subscriptions-by-plan breakdown, and the full user list table.
+  Fetches both `/admin/stats` and `/admin/users` on load; a `403`
+  (non-admin) renders a plain "Not authorized" page rather than a
+  broken one. `NavBar` shows an "Admin" link only when
+  `user.is_platform_admin` is true.
+- ✅ Automated backend tests: 319/319 passing (1 new,
+  `test_users_me_exposes_own_platform_admin_status` — asserts the
+  field is `false` for a fresh user and flips to `true` after really
+  running `scripts/grant_admin.py` against the test database, not just
+  toggling the field directly).
+- ✅ Automated frontend tests: 33/33 passing (6 new, in
+  `lib/format.test.ts`, covering `formatBytes` across B/KB/MB/GB and
+  confirming it doesn't overflow past TB for very large values).
+- ✅ **Verified live against a real running server, both the gate and
+  the real page**: a regular test account saw no "Admin" link and got
+  a real "Not authorized" page when navigating to `/dashboard/admin`
+  directly (the backend's real 403, not a client-side guess); a second
+  account was granted admin via the actual `scripts/grant_admin.py`
+  script (not a database edit), logged in, saw the "Admin" link appear,
+  and the page rendered real aggregate numbers (8 users, 7 workspaces,
+  7 datasets, 136.8 KB storage) matching the dev database's actual
+  accumulated state from this session's many prior verification
+  rounds. Independently confirmed via a direct API call that visiting
+  the user list had written a real `admin.user_data_accessed` audit
+  event with the real `returned_count` — not just that the page showed
+  data, but that the access-logging the backend promises actually fired
+  from a real page view, not only from a test client.
 
 ## Known limitations in what's built
 

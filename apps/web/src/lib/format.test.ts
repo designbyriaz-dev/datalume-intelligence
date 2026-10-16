@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { daysUntil, resetCountdownLabel } from "./format";
+import { daysUntil, formatBytes, resetCountdownLabel } from "./format";
 
 const FIXED_NOW = new Date("2026-03-15T12:00:00.000Z");
 
@@ -46,5 +46,32 @@ describe("resetCountdownLabel", () => {
   it("uses plural 'days' for more than 1 day", () => {
     const target = new Date(FIXED_NOW.getTime() + 16 * 24 * 60 * 60 * 1000).toISOString();
     expect(resetCountdownLabel(target)).toBe("resets in 16 days");
+  });
+});
+
+describe("formatBytes", () => {
+  it("shows 0 bytes as '0 B'", () => {
+    expect(formatBytes(0)).toBe("0 B");
+  });
+
+  it("keeps bytes as a whole number with no decimal", () => {
+    expect(formatBytes(512)).toBe("512 B");
+  });
+
+  it("formats kilobytes with one decimal place", () => {
+    expect(formatBytes(1536)).toBe("1.5 KB"); // 1536 / 1024 = 1.5
+  });
+
+  it("formats megabytes", () => {
+    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
+  });
+
+  it("formats gigabytes", () => {
+    expect(formatBytes(2.5 * 1024 * 1024 * 1024)).toBe("2.5 GB");
+  });
+
+  it("does not overflow past the largest supported unit (caps at TB)", () => {
+    const hugeValue = 1024 ** 5; // 1 petabyte's worth of bytes
+    expect(formatBytes(hugeValue)).toBe("1024.0 TB");
   });
 });

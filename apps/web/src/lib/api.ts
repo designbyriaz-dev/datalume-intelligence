@@ -74,6 +74,34 @@ export interface User {
   full_name: string;
   is_active: boolean;
   is_verified: boolean;
+  is_platform_admin: boolean;
+}
+
+export interface PlatformStats {
+  generated_at: string;
+  total_users: number;
+  active_users: number;
+  signups_last_30_days: number;
+  total_organizations: number;
+  total_workspaces: number;
+  total_datasets: number;
+  total_dataset_versions: number;
+  total_analysis_runs: number;
+  total_reports_generated: number;
+  total_storage_bytes: number;
+  subscriptions_by_plan: Record<string, number>;
+  estimated_mrr_gbp: number;
+  failed_logins_last_24h: number;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  is_verified: boolean;
+  is_platform_admin: boolean;
+  created_at: string;
 }
 
 export interface TokenResponse {
@@ -553,6 +581,10 @@ export const api = {
     request<AuditLogEntry[]>(`/api/v1/organizations/${organizationId}/audit-log`, {}, token),
 
   me: (token: string) => request<User>("/api/v1/users/me", {}, token),
+
+  getPlatformStats: (token: string) => request<PlatformStats>("/api/v1/admin/stats", {}, token),
+
+  listPlatformUsers: (token: string) => request<AdminUser[]>("/api/v1/admin/users", {}, token),
 
   listWorkspaces: (token: string) => request<Workspace[]>("/api/v1/workspaces", {}, token),
 

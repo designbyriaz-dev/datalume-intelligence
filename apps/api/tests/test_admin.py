@@ -26,6 +26,22 @@ async def _make_admin(db_session: AsyncSession, email: str) -> None:
     await db_session.commit()
 
 
+async def test_users_me_exposes_own_platform_admin_status(client: AsyncClient, db_session: AsyncSession) -> None:
+    # The frontend uses this to decide whether to show an "Admin" nav
+    # link at all, rather than showing a dead link every user would hit
+    # a 403 behind — this is the one piece of UserOut's data every user
+    # is allowed to see about themselves, never about anyone else
+    # (AdminUserOut, a separate schema, is what exposes it for others,
+    # and that's already gated behind require_platform_admin).
+    token = await _register_and_login(client, "regular@example.com")
+    before = await client.get("/api/v1/users/me", headers=_auth(token))
+    assert before.json()["is_platform_admin"] is False
+
+    await _make_admin(db_session, "regular@example.com")
+    after = await client.get("/api/v1/users/me", headers=_auth(token))
+    assert after.json()["is_platform_admin"] is True
+
+
 async def test_non_admin_cannot_access_admin_endpoints(client: AsyncClient) -> None:
     token = await _register_and_login(client, "owner@example.com")
 
