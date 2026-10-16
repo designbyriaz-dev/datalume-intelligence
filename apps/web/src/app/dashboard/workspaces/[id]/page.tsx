@@ -14,6 +14,9 @@ import {
   type FieldMapping,
   type IndustryKPIResponse,
   type ReportMeta,
+  type SavedScenario,
+  type ScenarioAdjustment,
+  type ScenarioResponse,
   type ScheduledReport,
   type VersionComparison,
   type WebhookSubscription,
@@ -503,6 +506,291 @@ function IndustryKpiPanel({ tableId, token, industry }: { tableId: string; token
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ADJUSTMENT_TYPES: { value: ScenarioAdjustment["adjustment_type"]; label: string }[] = [
+  { value: "percentage", label: "% change" },
+  { value: "fixed_amount", label: "+/- fixed amount" },
+  { value: "set_value", label: "set to value" },
+];
+
+interface AdjustmentRow {
+  column: string;
+  adjustment_type: ScenarioAdjustment["adjustment_type"];
+  value: string;
+}
+
+function ScenarioPanel({
+  tableId,
+  workspaceId,
+  token,
+  industry,
+  columns,
+}: {
+  tableId: string;
+  workspaceId: string;
+  token: string;
+  industry: string;
+  columns: ColumnProfile[];
+}) {
+  const numericColumns = columns.filter((c) => c.inferred_type === "integer" || c.inferred_type === "float");
+  const [rows, setRows] = useState<AdjustmentRow[]>([
+    { column: numericColumns[0]?.name ?? "", adjustment_type: "percentage", value: "" },
+  ]);
+  const [result, setResult] = useState<ScenarioResponse | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [scenarioName, setScenarioName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<SavedScenario[]>([]);
+
+  const loadSaved = useCallback(async () => {
+    try {
+      setSaved(await api.listSavedScenarios(token, workspaceId, tableId));
+    } catch {
+      // leave the saved list as-is on a transient fetch failure
+    }
+  }, [token, workspaceId, tableId]);
+
+  useEffect(() => {
+    if (INDUSTRY_PACK_IDS.has(industry)) loadSaved();
+  }, [industry, loadSaved]);
+
+  if (!INDUSTRY_PACK_IDS.has(industry)) return null;
+
+  const buildAdjustments = (): ScenarioAdjustment[] | null => {
+    const parsed: ScenarioAdjustment[] = [];
+    for (const row of rows) {
+      if (!row.column || row.value.trim() === "") continue;
+      const value = parseFloat(row.value);
+      if (!Number.isFinite(value)) return null;
+      parsed.push({ column: row.column, adjustment_type: row.adjustment_type, value });
+    }
+    return parsed.length > 0 ? parsed : null;
+  };
+
+  const onRun = async () => {
+    const adjustments = buildAdjustments();
+    if (!adjustments) {
+      setError("Enter at least one adjustment with a numeric value.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.runScenario(token, tableId, adjustments));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not run scenario.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSave = async () => {
+    const adjustments = buildAdjustments();
+    if (!adjustments || !scenarioName.trim()) {
+      setError("Enter a name and at least one adjustment before saving.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await api.createSavedScenario(token, workspaceId, {
+        dataset_table_id: tableId,
+        name: scenarioName.trim(),
+        adjustments,
+      });
+      setScenarioName("");
+      await loadSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save scenario.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onRunSaved = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.runSavedScenario(token, id));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not run saved scenario.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDeleteSaved = async (id: string) => {
+    try {
+      await api.deleteSavedScenario(token, id);
+      await loadSaved();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete saved scenario.");
+    }
+  };
+
+  const updateRow = (index: number, patch: Partial<AdjustmentRow>) => {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  };
+
+  const addRow = () => {
+    setRows((prev) => [...prev, { column: numericColumns[0]?.name ?? "", adjustment_type: "percentage", value: "" }]);
+  };
+
+  const removeRow = (index: number) => {
+    setRows((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 p-3 dark:border-slate-800">
+      <div className="text-xs font-medium text-slate-500">Scenario modelling (&ldquo;what if…&rdquo;)</div>
+      {numericColumns.length === 0 ? (
+        <p className="mt-2 text-xs text-slate-400">No numeric columns to adjust.</p>
+      ) : (
+        <>
+          <div className="mt-2 space-y-2">
+            {rows.map((row, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <select
+                  value={row.column}
+                  onChange={(e) => updateRow(i, { column: e.target.value })}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {numericColumns.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={row.adjustment_type}
+                  onChange={(e) => updateRow(i, { adjustment_type: e.target.value as ScenarioAdjustment["adjustment_type"] })}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {ADJUSTMENT_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  value={row.value}
+                  onChange={(e) => updateRow(i, { value: e.target.value })}
+                  placeholder="value"
+                  className="w-24 rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                />
+                {rows.length > 1 && (
+                  <button
+                    onClick={() => removeRow(i)}
+                    aria-label="Remove adjustment"
+                    className="text-xs text-slate-400 hover:text-red-500"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button onClick={addRow} className="text-xs text-brand-500 hover:underline">
+              + Add adjustment
+            </button>
+            <button
+              onClick={onRun}
+              disabled={busy}
+              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+            >
+              {busy ? "Running…" : "Run scenario"}
+            </button>
+            <input
+              value={scenarioName}
+              onChange={(e) => setScenarioName(e.target.value)}
+              placeholder="Name to save as…"
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            />
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+            >
+              {saving ? "Saving…" : "Save scenario"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      {saved.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs text-slate-400">Saved scenarios</div>
+          <ul className="mt-1 space-y-1">
+            {saved.map((s) => (
+              <li key={s.id} className="flex items-center justify-between gap-2 text-xs">
+                <span>{s.name}</span>
+                <span className="flex gap-3">
+                  <button
+                    onClick={() => onRunSaved(s.id)}
+                    disabled={busy}
+                    className="text-brand-500 hover:underline disabled:opacity-50"
+                  >
+                    Run
+                  </button>
+                  <button onClick={() => onDeleteSaved(s.id)} className="text-slate-400 hover:text-red-500">
+                    Delete
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="text-slate-500">
+                <th className="pr-4 py-1">KPI</th>
+                <th className="pr-4 py-1">Baseline</th>
+                <th className="pr-4 py-1">Scenario</th>
+                <th className="pr-4 py-1">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.kpi_deltas.map((d) => (
+                <tr key={d.kpi_id} className="border-t border-slate-200 dark:border-slate-800">
+                  <td className="pr-4 py-1 font-medium">{d.name}</td>
+                  <td className="pr-4 py-1">{d.baseline_value ?? "—"}</td>
+                  <td className="pr-4 py-1">{d.scenario_value ?? "—"}</td>
+                  <td className="pr-4 py-1">
+                    {d.pct_change !== null ? (
+                      <span
+                        className={
+                          d.pct_change > 0
+                            ? "text-green-600"
+                            : d.pct_change < 0
+                              ? "text-red-600"
+                              : "text-slate-500"
+                        }
+                      >
+                        {d.pct_change > 0 ? "+" : ""}
+                        {d.pct_change.toFixed(1)}%
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -1701,6 +1989,13 @@ function DatasetCard({
               onChanged={onChanged}
             />
             <IndustryKpiPanel tableId={table.id} token={token} industry={industry} />
+            <ScenarioPanel
+              tableId={table.id}
+              workspaceId={workspaceId}
+              token={token}
+              industry={industry}
+              columns={table.profile.columns}
+            />
             <AskAnalystBox tableId={table.id} token={token} />
             <ScheduledReportsPanel
               tableId={table.id}

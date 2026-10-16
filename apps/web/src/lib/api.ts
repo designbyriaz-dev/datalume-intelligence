@@ -360,10 +360,28 @@ export interface ScenarioKPIDelta {
   pct_change: number | null;
 }
 
+export interface ScenarioAdjustment {
+  column: string;
+  adjustment_type: "percentage" | "fixed_amount" | "set_value";
+  value: number;
+}
+
 export interface ScenarioResponse {
   industry_id: string;
-  adjustments_applied: { column: string; adjustment_type: string; value: number }[];
+  adjustments_applied: ScenarioAdjustment[];
+  baseline_kpis: KPIResult[];
+  scenario_kpis: KPIResult[];
   kpi_deltas: ScenarioKPIDelta[];
+}
+
+export interface SavedScenario {
+  id: string;
+  workspace_id: string;
+  dataset_table_id: string;
+  name: string;
+  adjustments: ScenarioAdjustment[];
+  created_by_user_id: string;
+  created_at: string;
 }
 
 export interface ApiKeyInfo {
@@ -854,16 +872,36 @@ export const api = {
       token
     ),
 
-  runScenario: (
-    token: string,
-    tableId: string,
-    adjustments: { column: string; adjustment_type: string; value: number }[]
-  ) =>
+  runScenario: (token: string, tableId: string, adjustments: ScenarioAdjustment[]) =>
     request<ScenarioResponse>(
       `/api/v1/dataset-tables/${tableId}/scenario`,
       { method: "POST", body: JSON.stringify({ adjustments }) },
       token
     ),
+
+  listSavedScenarios: (token: string, workspaceId: string, datasetTableId?: string) =>
+    request<SavedScenario[]>(
+      `/api/v1/workspaces/${workspaceId}/saved-scenarios${datasetTableId ? `?dataset_table_id=${datasetTableId}` : ""}`,
+      {},
+      token
+    ),
+
+  createSavedScenario: (
+    token: string,
+    workspaceId: string,
+    payload: { dataset_table_id: string; name: string; adjustments: ScenarioAdjustment[] }
+  ) =>
+    request<SavedScenario>(
+      `/api/v1/workspaces/${workspaceId}/saved-scenarios`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  deleteSavedScenario: (token: string, savedScenarioId: string) =>
+    request<void>(`/api/v1/saved-scenarios/${savedScenarioId}`, { method: "DELETE" }, token),
+
+  runSavedScenario: (token: string, savedScenarioId: string) =>
+    request<ScenarioResponse>(`/api/v1/saved-scenarios/${savedScenarioId}/run`, { method: "POST" }, token),
 
   listApiKeys: (token: string) => request<ApiKeyInfo[]>("/api/v1/api-keys", {}, token),
 

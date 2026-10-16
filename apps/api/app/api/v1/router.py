@@ -13,6 +13,7 @@ from app.api.v1.routers import (
     industry,
     organizations,
     reports,
+    saved_scenarios,
     scheduled_reports,
     sso,
     users,
@@ -38,3 +39,4 @@ api_router.include_router(api_keys.router)
 api_router.include_router(admin.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(sso.router)
+api_router.include_router(saved_scenarios.router)

@@ -9,14 +9,16 @@ from app.api.resolvers import get_table_chain_or_404
 from app.core.industry_packs import INDUSTRY_PACKS, get_industry_pack
 from app.db.session import get_db
 from app.models.analysis import AnalysisRun
+from app.models.dataset import DatasetTable
 from app.models.user import User
+from app.models.workspace import Workspace
 from app.schemas.industry import (
     ConfirmFieldMappingRequest,
     FieldMappingOut,
     IndustryKPIResponse,
     IndustryPackOut,
 )
-from app.schemas.scenario import KPIDeltaOut, ScenarioRequest, ScenarioResponse
+from app.schemas.scenario import KPIDeltaOut, ScenarioAdjustmentIn, ScenarioRequest, ScenarioResponse
 from app.services import billing
 from app.services.authz import require_workspace_access, require_workspace_write_access
 from app.services.datasets import get_dataset_table_dataframe
@@ -260,20 +262,25 @@ def _kpi_deltas(baseline: list, scenario: list) -> list[dict]:
     return deltas
 
 
-@router.post("/dataset-tables/{table_id}/scenario", response_model=ScenarioResponse)
-async def run_scenario(
-    table_id: str,
-    payload: ScenarioRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    storage: ObjectStorage = Depends(get_object_storage),
+async def run_scenario_computation(
+    db: AsyncSession,
+    storage: ObjectStorage,
+    *,
+    table: DatasetTable,
+    workspace: Workspace,
+    current_user: User,
+    adjustments_in: list[ScenarioAdjustmentIn],
 ) -> ScenarioResponse:
     """'What if rent increases 5%?' — applies adjustments to a copy of the
     data and recomputes the same KPI engine used by /industry-kpis, so
-    baseline and scenario numbers are produced by identical code."""
-    table, _version, _dataset, workspace = await get_table_chain_or_404(db, table_id)
-    await require_workspace_access(db, current_user.id, workspace)
+    baseline and scenario numbers are produced by identical code.
 
+    Shared by the ad-hoc /scenario endpoint below and
+    app.api.v1.routers.saved_scenarios' "run a saved scenario" endpoint,
+    so re-running a saved scenario can never compute a different result
+    than running the same adjustments fresh — same discipline as the KPI
+    engine being shared between /industry-kpis and the specialist reports.
+    """
     pack = get_industry_pack(workspace.industry)
     if pack is None:
         raise HTTPException(
@@ -288,7 +295,7 @@ async def run_scenario(
     window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
     baseline_kpis = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
 
-    adjustments = [ScenarioAdjustment(a.column, a.adjustment_type, a.value) for a in payload.adjustments]
+    adjustments = [ScenarioAdjustment(a.column, a.adjustment_type, a.value) for a in adjustments_in]
     try:
         adjusted_df = apply_adjustments(df, adjustments)
     except ScenarioError as exc:
@@ -311,8 +318,28 @@ async def run_scenario(
 
     return ScenarioResponse(
         industry_id=pack.industry_id,
-        adjustments_applied=payload.adjustments,
+        adjustments_applied=adjustments_in,
         baseline_kpis=[asdict(r) for r in baseline_kpis],
         scenario_kpis=[asdict(r) for r in scenario_kpis],
         kpi_deltas=[KPIDeltaOut(**d) for d in _kpi_deltas(baseline_kpis, scenario_kpis)],
+    )
+
+
+@router.post("/dataset-tables/{table_id}/scenario", response_model=ScenarioResponse)
+async def run_scenario(
+    table_id: str,
+    payload: ScenarioRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> ScenarioResponse:
+    table, _version, _dataset, workspace = await get_table_chain_or_404(db, table_id)
+    await require_workspace_access(db, current_user.id, workspace)
+    return await run_scenario_computation(
+        db,
+        storage,
+        table=table,
+        workspace=workspace,
+        current_user=current_user,
+        adjustments_in=payload.adjustments,
     )

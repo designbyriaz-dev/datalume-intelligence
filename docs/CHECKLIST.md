@@ -541,10 +541,13 @@ could be written honestly rather than guessed.
   done, see "Post-Phase-7: dashboard drag-and-drop reorder" below.
   Widget *resizing* and multiple saved layouts per table are still not
   built — only reorder-within-a-list, no freeform/2D grid placement.
-- ⬜ Scenario modeling only adjusts existing numeric columns by a
-  percentage/fixed amount/fixed value — no multi-variable scenario
-  presets, no saved/named scenarios, no scenario comparison across more
-  than one adjustment set at a time.
+- ✅⚠️ **Saved/named scenarios** — done, see "Post-Phase-7: saved
+  scenarios and a scenario modeling UI" below, which also closed a
+  much bigger gap found along the way: no frontend UI for scenario
+  modeling existed at all before this round, ad-hoc or saved. Still
+  true: no multi-variable "preset" concept beyond a saved scenario's
+  own adjustment list, and no comparison across more than one
+  adjustment set at a time in a single view.
 - ✅⚠️ Picking two versions from a dropdown is done — see "Post-Phase-7:
   dataset version comparison UI" below. Still true: no "what changed"
   notification when a new version is uploaded (the brief's "offer
@@ -2440,6 +2443,67 @@ seasonality gap, which stays open.
   0` and all four rows landed in the correct month buckets
   (2026-01 through 2026-04) with the right summed values. Before this
   change all four would have been silently excluded.
+
+## Post-Phase-7: saved scenarios and a scenario modeling UI
+
+Set out to close "no saved/named scenarios" (Phase 6). Investigation
+found a much bigger gap first: `apps/web/src/lib/api.ts` had a
+`runScenario` client method and `POST /dataset-tables/{id}/scenario`
+was fully built and tested on the backend, but **nothing in the
+frontend ever called it** — zero scenario UI existed anywhere, ad-hoc
+or saved. So this round builds both: the scenario-running UI that
+should have shipped with the Phase 6 backend, and saved/named
+scenarios on top of it.
+
+- ✅ **`run_scenario_computation`** (`app/api/v1/routers/industry.py`):
+  the body of the ad-hoc `/scenario` endpoint extracted into a shared
+  function so a saved scenario's "run" endpoint can never compute a
+  different result than running the same adjustments fresh — same
+  discipline as the KPI engine being shared between `/industry-kpis`
+  and the specialist reports.
+- ✅ **`SavedScenario` model** (migration `8ce6893b37a6`): `workspace_id`
+  + `dataset_table_id` (both CASCADE FKs, same pattern as
+  `ScheduledReport`), `name`, `adjustments` (JSON array of
+  `{column, adjustment_type, value}` — the same shape
+  `ScenarioAdjustmentIn` already validates for the ad-hoc endpoint, so
+  a saved row can never hold an adjustment the computation layer
+  wouldn't also accept fresh), `created_by_user_id`.
+  `app/api/v1/routers/saved_scenarios.py`: create/list (filterable by
+  `dataset_table_id`)/delete (write access for mutations, read access
+  for list/run — same split `ScheduledReport` uses) plus
+  `POST /saved-scenarios/{id}/run`, which resolves the table fresh from
+  the saved `dataset_table_id` and calls `run_scenario_computation` —
+  re-running a saved scenario goes through the exact same quota check
+  and KPI engine as running it ad-hoc.
+- ✅ **Frontend `ScenarioPanel`** (new, in the workspace page, shown for
+  the same three industries with a pack): adjustment rows (numeric
+  column, percentage/fixed-amount/set-value, a value), "Run scenario"
+  showing a baseline/scenario/% change table per KPI, a name field +
+  "Save scenario", and a "Saved scenarios" list with per-scenario
+  Run/Delete. Column dropdown is filtered to the table's numeric
+  columns only (scenario adjustments reject non-numeric columns
+  server-side anyway — filtering client-side avoids a round-trip just
+  to find that out). Also fixed a frontend/backend type drift caught
+  while touching this file: `apps/web/src/lib/api.ts`'s
+  `ScenarioResponse` interface was missing `baseline_kpis`/
+  `scenario_kpis`, which the backend schema had always returned.
+- ✅ Automated backend tests: 318/318 passing (5 new in
+  `tests/test_saved_scenarios.py` — create+list, delete (and confirms
+  a deleted scenario's `/run` 404s), a saved scenario's run producing
+  the exact same numbers as the equivalent ad-hoc `/scenario` test
+  elsewhere in the suite, a `dataset_table_id` belonging to a different
+  workspace rejected with 400, and an outsider 403d on every one of
+  create/list/run/delete).
+- ✅ **Verified live against a real running server, the full loop**:
+  created a real commercial_property workspace, uploaded a 2-row rent
+  roll, entered a 10% rent increase in the real UI, ran it (Total Rent
+  Roll £3,000 → £3,300, +10%; Occupancy Rate correctly unaffected at
+  0.0% change), saved it as "Rent +10%", confirmed the real
+  `POST .../saved-scenarios` (201) in the network panel, clicked
+  &ldquo;Run&rdquo; on the saved entry and confirmed the real
+  `POST /saved-scenarios/{id}/run` (200) reproduced the identical
+  numbers, then deleted it and confirmed the "Saved scenarios" section
+  correctly disappeared once the list was empty again.
 
 ## Known limitations in what's built
 

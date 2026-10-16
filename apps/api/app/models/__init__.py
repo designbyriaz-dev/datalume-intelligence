@@ -16,6 +16,7 @@ from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
 from app.models.rate_limit import RateLimitWindow
 from app.models.report import Report
+from app.models.saved_scenario import SavedScenario
 from app.models.scheduled_report import ScheduledReport
 from app.models.scheduler_lock import SchedulerLock
 from app.models.sso_state import SSOLoginState
@@ -49,6 +50,7 @@ __all__ = [
     "DashboardComment",
     "ScheduledReport",
     "SchedulerLock",
+    "SavedScenario",
     "ApiKey",
     "AuditLog",
     "WebhookSubscription",
