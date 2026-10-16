@@ -5,20 +5,178 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
-import { api, type Organization, type Subscription, type Workspace, ApiError } from "@/lib/api";
+import { api, type IndustryPack, type Organization, type Subscription, type Workspace, ApiError } from "@/lib/api";
 import { resetCountdownLabel } from "@/lib/format";
 
-const INDUSTRIES = [
+// Industries with no dedicated pack (app/core/industry_packs.py has no
+// entry for these) — kept as a plain dropdown behind "Something else",
+// same free-form choice the old single-step form always offered,
+// rather than inventing KPI packs for domains the backend doesn't
+// actually support yet (see docs/CHECKLIST.md's public-sector/education
+// scope note).
+const OTHER_INDUSTRIES = [
   { value: "general", label: "General Data Analysis" },
-  { value: "commercial_property", label: "Commercial Property" },
-  { value: "residential_property", label: "Residential Property" },
-  { value: "social_housing", label: "Social Housing" },
-  { value: "business_finance", label: "Business & Finance" },
   { value: "public_sector", label: "Government & Public Services" },
   { value: "education", label: "Education" },
   { value: "operations_logistics", label: "Operations & Logistics" },
   { value: "other", label: "Other" },
 ];
+
+type WorkspaceTypeChoice = { industryId: string; packName: string | null };
+
+function CreateWorkspace({
+  token,
+  organizations,
+  onCreated,
+}: {
+  token: string;
+  organizations: Organization[];
+  onCreated: (ws: Workspace) => void;
+}) {
+  const [packs, setPacks] = useState<IndustryPack[] | null>(null);
+  const [choice, setChoice] = useState<WorkspaceTypeChoice | null>(null);
+  const [otherIndustry, setOtherIndustry] = useState("general");
+  const [name, setName] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.listIndustryPacks(token).then(setPacks).catch(() => setPacks([]));
+  }, [token]);
+
+  const onCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!choice) return;
+    const industry = choice.industryId === "__other__" ? otherIndustry : choice.industryId;
+    setError(null);
+    setCreating(true);
+    try {
+      const ws = await api.createWorkspace(token, name, industry, organizationId || undefined);
+      onCreated(ws);
+      setName("");
+      setChoice(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create workspace.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (!choice) {
+    return (
+      <div className="mt-8">
+        <h2 className="font-medium">What do you want to analyse?</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Pick what&rsquo;s closest to your data — it tunes the KPIs, reports, and questions you&rsquo;ll
+          see for this workspace. You can still upload any CSV or Excel file either way.
+        </p>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {packs === null ? (
+            <p className="text-sm text-slate-500">Loading…</p>
+          ) : (
+            <>
+              {packs.map((pack) => (
+                <button
+                  key={pack.industry_id}
+                  type="button"
+                  onClick={() => setChoice({ industryId: pack.industry_id, packName: pack.name })}
+                  className="rounded-lg border border-slate-200 p-4 text-left hover:border-brand-500 dark:border-slate-800"
+                >
+                  <div className="font-medium">{pack.name}</div>
+                  {pack.suggested_questions.slice(0, 2).map((q) => (
+                    <div key={q} className="mt-1 text-xs text-slate-500">
+                      &ldquo;{q}&rdquo;
+                    </div>
+                  ))}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setChoice({ industryId: "__other__", packName: null })}
+                className="rounded-lg border border-dashed border-slate-300 p-4 text-left hover:border-brand-500 dark:border-slate-700"
+              >
+                <div className="font-medium">Something else</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  General data analysis, public sector, education, operations &amp; logistics, or
+                  anything else.
+                </div>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-8">
+      <button
+        type="button"
+        onClick={() => setChoice(null)}
+        className="text-sm text-brand-500 hover:underline"
+      >
+        ← Choose a different type
+      </button>
+      <h2 className="mt-2 font-medium">{choice.packName ?? "Something else"}</h2>
+
+      <form onSubmit={onCreate} className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="flex-1">
+          <label className="block text-sm font-medium">Workspace name</label>
+          <input
+            required
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. My Rental Portfolio"
+            className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+          />
+        </div>
+        {choice.industryId === "__other__" && (
+          <div>
+            <label className="block text-sm font-medium">Industry</label>
+            <select
+              value={otherIndustry}
+              onChange={(e) => setOtherIndustry(e.target.value)}
+              className="mt-1 rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+            >
+              {OTHER_INDUSTRIES.map((i) => (
+                <option key={i.value} value={i.value}>
+                  {i.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {organizations.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium">Owner</label>
+            <select
+              value={organizationId}
+              onChange={(e) => setOrganizationId(e.target.value)}
+              className="mt-1 rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">Personal</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={creating}
+          className="rounded-md bg-brand-500 px-4 py-2 font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+        >
+          {creating ? "Creating…" : "Create workspace"}
+        </button>
+      </form>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { user, token, loading } = useAuth();
@@ -26,11 +184,6 @@ export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [name, setName] = useState("");
-  const [industry, setIndustry] = useState("general");
-  const [organizationId, setOrganizationId] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -45,22 +198,6 @@ export default function DashboardPage() {
       api.listOrganizations(token).then(setOrganizations).catch(() => setOrganizations([]));
     }
   }, [token]);
-
-  const onCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token) return;
-    setError(null);
-    setCreating(true);
-    try {
-      const ws = await api.createWorkspace(token, name, industry, organizationId || undefined);
-      setWorkspaces((prev) => [...(prev ?? []), ws]);
-      setName("");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create workspace.");
-    } finally {
-      setCreating(false);
-    }
-  };
 
   if (loading || !user) {
     return (
@@ -111,57 +248,13 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <form onSubmit={onCreate} className="mt-8 flex flex-wrap items-end gap-3">
-          <div className="flex-1">
-            <label className="block text-sm font-medium">Workspace name</label>
-            <input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. My Rental Portfolio"
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium">Industry</label>
-            <select
-              value={industry}
-              onChange={(e) => setIndustry(e.target.value)}
-              className="mt-1 rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
-            >
-              {INDUSTRIES.map((i) => (
-                <option key={i.value} value={i.value}>
-                  {i.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          {organizations.length > 0 && (
-            <div>
-              <label className="block text-sm font-medium">Owner</label>
-              <select
-                value={organizationId}
-                onChange={(e) => setOrganizationId(e.target.value)}
-                className="mt-1 rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
-              >
-                <option value="">Personal</option>
-                {organizations.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={creating}
-            className="rounded-md bg-brand-500 px-4 py-2 font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-          >
-            {creating ? "Creating…" : "Create workspace"}
-          </button>
-        </form>
-        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {token && (
+          <CreateWorkspace
+            token={token}
+            organizations={organizations}
+            onCreated={(ws) => setWorkspaces((prev) => [...(prev ?? []), ws])}
+          />
+        )}
 
         <div className="mt-10">
           <h2 className="font-medium">Your workspaces</h2>

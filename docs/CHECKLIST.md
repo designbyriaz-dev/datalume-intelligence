@@ -60,8 +60,8 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   "transactional email" section below.
 - ✅ MFA — TOTP-based, see "Post-Phase-7: MFA (TOTP two-factor
   authentication)" below.
-- ⬜ Onboarding "what do you want to analyse" flow (industry is currently
-  just a dropdown on workspace creation, not a guided first-run flow)
+- ✅ Onboarding "what do you want to analyse" flow — see "Post-Phase-7:
+  guided workspace-creation flow" below.
 - ⬜ Full public page set from the brief (Features, How It Works,
   Solutions sub-pages, Security page, About, Contact, FAQs, ToS, Privacy
   Policy, Cookie Preferences) — only a homepage and a static pricing page
@@ -2993,6 +2993,52 @@ credential-gated, not something to build further right now).
   a wrong password was rejected with "Incorrect password" shown inline,
   the correct password disabled it and the page reverted to "off",
   confirmed by re-reading the real `/users/me` response.
+
+## Post-Phase-7: guided workspace-creation flow
+
+The last self-contained Phase 1 gap — chosen over the other remaining
+items specifically because it needed no product/brand-voice decisions
+(unlike the public-page copy, deliberately left alone) and no external
+credentials (unlike Stripe live, a real S3 bucket, or the Okta/Azure AD
+tenant).
+
+- ✅ **No backend changes needed** — `GET /industry-packs` already
+  returned everything the flow needed (`name`, `suggested_questions`,
+  `kpis`), it just had no frontend caller for the list form yet (only
+  `GET /industry-packs/{id}` was used, by the dashboard chart-widget
+  picker). Added `listIndustryPacks` to `api.ts` and extended the
+  `IndustryPack` interface with the two fields that endpoint already
+  sent but the frontend type didn't declare.
+- ✅ **`CreateWorkspace`** (`apps/web/src/app/dashboard/page.tsx`, new
+  component replacing the old single-step name+dropdown form): step
+  one renders a card per real industry pack — name plus its first two
+  `suggested_questions` as a concrete preview of what the workspace
+  will let you ask, not just an abstract label — alongside a
+  "Something else" card. Picking a pack card advances straight to step
+  two (name + Create, no industry field — already decided); picking
+  "Something else" advances to the exact same free-form dropdown the
+  old form always had (general / public sector / education /
+  operations & logistics / other — industries with no registered pack
+  in `app/core/industry_packs.py`, so inventing cards for them would
+  mean fabricating KPIs the backend can't actually compute). A "←
+  Choose a different type" link goes back; creating a workspace resets
+  to step one rather than staying on step two, so adding a second
+  workspace of a different type doesn't require an extra click to back
+  out first.
+- ✅ Frontend: 36/36 passing (unchanged — no new pure logic; this is a
+  UI restructuring of an existing form around an existing endpoint, not
+  new business logic worth isolating into a testable function).
+- ✅ **Verified live against a real running server**: loaded the real
+  dashboard and confirmed all 4 real industry packs rendered as cards
+  with their real `suggested_questions` text (not placeholders) plus
+  the "Something else" card. Picked "Commercial Property Intelligence",
+  confirmed step two showed that exact pack name with no industry
+  dropdown, created a real workspace named "Onboarding Test WS", and
+  confirmed it appeared in "Your workspaces" tagged "COMMERCIAL
+  PROPERTY" (correct) — and that the flow reset to step one afterward.
+  Separately picked "Something else" and confirmed the free-form
+  Industry dropdown (defaulting to General Data Analysis) rendered
+  exactly as the old form's did.
 
 ## Known limitations in what's built
 

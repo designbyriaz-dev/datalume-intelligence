@@ -386,6 +386,8 @@ export interface IndustryPack {
   industry_id: string;
   name: string;
   kpis: KPIDefinition[];
+  suggested_questions: string[];
+  report_templates: string[];
 }
 
 export interface ToolParameter {
@@ -971,6 +973,8 @@ export const api = {
 
   getIndustryPack: (token: string, industryId: string) =>
     request<IndustryPack>(`/api/v1/industry-packs/${industryId}`, {}, token),
+
+  listIndustryPacks: (token: string) => request<IndustryPack[]>("/api/v1/industry-packs", {}, token),
 
   deleteDashboard: (token: string, dashboardId: string) =>
     request<void>(`/api/v1/dashboards/${dashboardId}`, { method: "DELETE" }, token),
