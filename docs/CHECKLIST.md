@@ -344,10 +344,12 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   the Phase 7 section below. Churn specifically (subscriptions lost
   over time) still isn't tracked — the dashboard shows a point-in-time
   snapshot, not a trend.
-- ⬜ Usage is tracked per calendar month only; there's no usage-history
-  view, no "usage resets in N days" countdown, no proration display for
-  mid-cycle plan changes (Stripe handles proration on its side once
-  Checkout/Portal are live, but nothing surfaces that to the user yet).
+- ✅⚠️ **"Usage resets in N days" countdown** — done, see "Post-Phase-7:
+  usage reset countdown" below. Still true: usage is tracked per
+  calendar month only, with no usage-history view and no proration
+  display for mid-cycle plan changes (Stripe handles proration on its
+  side once Checkout/Portal are live, but nothing surfaces that to the
+  user yet).
 
 ## Phase 5 — Specialist Intelligence
 
@@ -431,10 +433,12 @@ could be written honestly rather than guessed.
   problem — a third report on an existing pack, or a new pack (public
   sector/education), the latter needing real domain input first (see
   `app/core/industry_packs.py`'s module docstring).
-- ⬜ Dashboards are KPI stat-cards only — no interactive drag-and-drop
-  layout, no saved/customised dashboard arrangements, no charts beyond
-  the PDF report's static rent-by-category table. A real dashboard
-  builder is explicitly Phase 6 ("Advanced Analytics") work.
+- ✅ Dashboards moved well past "KPI stat-cards only" — persisted
+  dashboards with drag-and-drop reorder and chart widgets (not just the
+  PDF report's static table) now exist; see "Post-Phase-7: dashboard
+  drag-and-drop reorder, add, and remove widgets" below for the full
+  Phase 6 build-out. Widget resizing and multiple saved layouts per
+  table are still not built (see that section's own remaining gaps).
 - ⬜ Public sector and education/health packs — not started (see scope
   note above).
 - ✅ Column matching is still a heuristic (word-token overlap), not a
@@ -2281,11 +2285,67 @@ picking an arbitrary page.
   fast before spending time on a full Next.js build) — the step didn't
   exist in the original CI workflow because there was nothing real for
   it to run yet.
-- ⬜ Still only one file covered — `lib/auth.tsx` (the auth context/hook)
-  and every page component remain untested. A page/component suite
-  would need `jsdom` or `happy-dom` plus `@testing-library/react`,
-  neither installed yet — a reasonable next step, not done here to keep
-  this round's dependency footprint at zero new packages.
+- ⬜ Still only `lib/api.ts` and (since the next round below) `lib/format.ts`
+  covered — `lib/auth.tsx` (the auth context/hook) and every page
+  component remain untested. A page/component suite would need `jsdom`
+  or `happy-dom` plus `@testing-library/react`, neither installed yet —
+  a reasonable next step, not done here to keep this round's dependency
+  footprint at zero new packages.
+
+## Post-Phase-7: usage reset countdown
+
+Closes one part of the Phase 4 "no usage-history view, no 'usage
+resets in N days' countdown" gap — the countdown specifically, not
+usage history or proration display (still open, see Phase 4 above).
+
+- ✅ **`next_usage_reset`** (`app/services/billing.py`): the real
+  Stripe billing-cycle boundary (`Subscription.current_period_end`,
+  synced from the `customer.subscription.updated` webhook) when it's
+  set and still in the future; otherwise the first of next calendar
+  month at UTC midnight — the same boundary `current_period_key()`
+  already uses to decide when a new `UsageCounter` row starts. Falls
+  back to the calendar-month boundary (rather than trusting a stale
+  date) if `current_period_end` has already passed — covers a
+  cancelled/downgraded-to-free subscription whose last real Stripe
+  period ended with nothing clearing that field.
+- ✅ **A real cross-backend datetime bug caught by writing the tests,
+  not by inspection**: `current_period_end` is a `DateTime(timezone=True)`
+  column that Postgres returns timezone-aware but SQLite returns naive
+  on read (even though it's always written as UTC) — the exact quirk
+  already documented in this file's Phase 6 section for
+  `scheduled_reports.py`, now hit a second time. Comparing a naive
+  SQLite-read value against a fresh `datetime.now(timezone.utc)`
+  without normalizing first raises `TypeError`. Fixed by treating a
+  naive `current_period_end` as UTC before comparing or returning it —
+  covered by a dedicated test
+  (`test_naive_period_end_from_sqlite_is_treated_as_utc`).
+  `UsageOut.resets_at` added to the `GET /billing/subscription`
+  response schema.
+- ✅ **Frontend**: `apps/web/src/lib/format.ts` (new, `daysUntil` +
+  `resetCountdownLabel`) renders "resets today" / "resets in 1 day" /
+  "resets in N days" next to the existing usage text on the dashboard.
+  Extracted into `lib/format.ts` rather than kept as page-local
+  functions specifically so it could be unit tested the same way
+  `lib/api.ts` was in the previous round, rather than needing
+  `@testing-library/react` just to test two pure date functions.
+- ✅ Automated backend tests: 293/293 passing (5 new in
+  `tests/test_usage_reset.py` — pure unit tests constructing a
+  `Subscription` in memory with no DB session, covering the free-plan
+  calendar boundary, December→January rollover, a future real Stripe
+  period end, a stale past one falling back correctly, and the
+  naive/SQLite datetime case — plus one existing `test_billing.py`
+  assertion extended to check the free-plan response's `resets_at`).
+- ✅ Automated frontend tests: 17/17 passing (7 new in
+  `lib/format.test.ts`, using `vi.useFakeTimers()` to pin "now" so the
+  day-rounding and pluralization assertions are deterministic rather
+  than depending on when the suite happens to run).
+- ✅ **Verified live against a real running server**: registered a
+  real user on 16 October 2026, confirmed the dashboard read "Free
+  plan · 0 / 3 analyses used this month · resets in 16 days" (16
+  October → 1 November is exactly 16 days), and independently queried
+  `GET /billing/subscription` directly, confirming
+  `resets_at: "2026-11-01T00:00:00Z"` in the raw JSON — not just that
+  the UI showed a plausible-looking number.
 
 ## Known limitations in what's built
 

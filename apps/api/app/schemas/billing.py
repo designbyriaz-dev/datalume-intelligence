@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -16,6 +18,10 @@ class UsageOut(BaseModel):
     period_key: str
     analyses_used: int
     analyses_limit: int | None
+    resets_at: datetime = Field(
+        description="When the analyses count resets to 0 — the real Stripe billing-cycle boundary for a "
+        "paid subscription, or the first of next calendar month (UTC) for a free one."
+    )
 
 
 class SubscriptionOut(BaseModel):

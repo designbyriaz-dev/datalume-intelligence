@@ -1,3 +1,4 @@
+import datetime as dt
 import os
 
 from httpx import AsyncClient
@@ -57,6 +58,13 @@ async def test_new_user_gets_free_subscription_automatically(client: AsyncClient
     assert body["status"] == "active"
     assert body["usage"]["analyses_used"] == 0
     assert body["usage"]["analyses_limit"] == 3
+    # Free plan: resets at the start of next calendar month (UTC), not
+    # some arbitrary Stripe date — there is no Stripe subscription here.
+    resets_at = dt.datetime.fromisoformat(body["usage"]["resets_at"])
+    now = dt.datetime.now(dt.timezone.utc)
+    assert resets_at.month == (now.month % 12) + 1
+    assert resets_at.day == 1
+    assert resets_at > now
 
 
 async def test_analyze_consumes_quota_and_blocks_once_exhausted(client: AsyncClient) -> None:

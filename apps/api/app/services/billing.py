@@ -32,6 +32,38 @@ def current_period_key(now: datetime | None = None) -> str:
     return f"{now.year:04d}-{now.month:02d}"
 
 
+def next_usage_reset(subscription: Subscription, period_key: str, now: datetime | None = None) -> datetime:
+    """When the current usage period ends and the analyses count resets.
+
+    A Stripe-backed subscription's real billing-cycle boundary
+    (`current_period_end`, synced from Stripe's webhook) is authoritative
+    when it's set and still in the future. Otherwise — a free-plan
+    subscription (which never gets a `current_period_end`), or a stale
+    one left over from before a cancellation/downgrade — falls back to
+    the first of the next calendar month at UTC midnight, the same
+    boundary `current_period_key()` already uses to decide when a new
+    `UsageCounter` row starts.
+    """
+    now = now or datetime.now(timezone.utc)
+    period_end = subscription.current_period_end
+    if period_end is not None:
+        # SQLite returns this DateTime(timezone=True) column naive on
+        # read even though it's always written as UTC
+        # (webhook_handlers.py uses datetime.fromtimestamp(..., tz=utc));
+        # Postgres preserves tz-awareness. Normalize so the comparison
+        # and the returned value are consistent on either backend — same
+        # quirk documented for scheduled_reports.py.
+        if period_end.tzinfo is None:
+            period_end = period_end.replace(tzinfo=timezone.utc)
+        if period_end > now:
+            return period_end
+
+    year, month = (int(part) for part in period_key.split("-"))
+    if month == 12:
+        return datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    return datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+
 async def get_or_create_subscription_for_user(db: AsyncSession, user_id: str) -> Subscription:
     result = await db.execute(select(Subscription).where(Subscription.owner_user_id == user_id))
     subscription = result.scalar_one_or_none()

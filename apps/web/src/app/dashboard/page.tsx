@@ -6,6 +6,7 @@ import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
 import { api, type Organization, type Subscription, type Workspace, ApiError } from "@/lib/api";
+import { resetCountdownLabel } from "@/lib/format";
 
 const INDUSTRIES = [
   { value: "general", label: "General Data Analysis" },
@@ -87,6 +88,8 @@ export default function DashboardPage() {
               {subscription.usage.analyses_limit === null
                 ? `${subscription.usage.analyses_used} analyses this month`
                 : `${subscription.usage.analyses_used} / ${subscription.usage.analyses_limit} analyses used this month`}
+              {" · "}
+              <span className="text-slate-500">{resetCountdownLabel(subscription.usage.resets_at)}</span>
             </div>
             <div className="flex items-center gap-4">
               <Link href="/dashboard/organizations" className="text-sm text-brand-500 hover:underline">

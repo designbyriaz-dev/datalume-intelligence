@@ -241,6 +241,7 @@ export interface Subscription {
     period_key: string;
     analyses_used: number;
     analyses_limit: number | null;
+    resets_at: string;
   };
 }
 

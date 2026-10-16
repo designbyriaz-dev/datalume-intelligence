@@ -84,7 +84,10 @@ async def _to_subscription_out(db: AsyncSession, subscription: Subscription) -> 
         current_period_end=subscription.current_period_end,
         cancel_at_period_end=subscription.cancel_at_period_end,
         usage=UsageOut(
-            period_key=period_key, analyses_used=analyses_used, analyses_limit=plan.max_analyses_per_month
+            period_key=period_key,
+            analyses_used=analyses_used,
+            analyses_limit=plan.max_analyses_per_month,
+            resets_at=billing.next_usage_reset(subscription, period_key),
         ),
     )
 
