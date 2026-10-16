@@ -11,7 +11,16 @@ export function NavBar() {
       <Link href="/" className="text-lg font-semibold tracking-tight">
         DataLume <span className="text-brand-500">Intelligence</span>
       </Link>
-      <nav className="flex items-center gap-6 text-sm">
+      <nav className="flex flex-wrap items-center justify-end gap-x-6 gap-y-2 text-sm">
+        <Link href="/features" className="hover:text-brand-500">
+          Features
+        </Link>
+        <Link href="/solutions" className="hover:text-brand-500">
+          Solutions
+        </Link>
+        <Link href="/security" className="hover:text-brand-500">
+          Security
+        </Link>
         <Link href="/pricing" className="hover:text-brand-500">
           Pricing
         </Link>

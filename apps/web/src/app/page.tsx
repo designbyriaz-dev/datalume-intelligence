@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
+import { MarketingFooter } from "@/components/MarketingFooter";
 
 const SOLUTIONS = [
-  { name: "Commercial Property", blurb: "Lease expiry, rent rolls, vacancy and NOI in one view." },
+  { name: "Commercial Property", blurb: "Lease expiry, rent rolls, vacancy and arrears in one view." },
   { name: "Residential & Lettings", blurb: "Arrears, void periods and portfolio profitability." },
   { name: "Social Housing", blurb: "Stock condition, compliance exceptions and investment planning." },
-  { name: "Business & Finance", blurb: "Revenue, cash flow and customer trends, explained plainly." },
-  { name: "Public Sector", blurb: "Service demand, spend and outcomes across your area." },
+  { name: "Business & Finance", blurb: "Revenue, expenses and profitability trends, explained plainly." },
 ];
 
 export default function HomePage() {
@@ -51,13 +51,15 @@ export default function HomePage() {
             </div>
           ))}
         </div>
+        <p className="mt-6 text-center text-sm text-slate-500">
+          <Link href="/solutions" className="text-brand-500 hover:underline">
+            See the detail for each industry
+          </Link>{" "}
+          · four get a dedicated KPI engine today; everything else still gets full analytics.
+        </p>
       </section>
 
-      <footer className="border-t border-slate-200 px-6 py-8 text-center text-sm text-slate-500 dark:border-slate-800">
-        DataLume Intelligence — built incrementally. See{" "}
-        <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">docs/CHECKLIST.md</code> for what
-        is live today.
-      </footer>
+      <MarketingFooter />
     </main>
   );
 }

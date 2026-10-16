@@ -62,10 +62,11 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   authentication)" below.
 - ✅ Onboarding "what do you want to analyse" flow — see "Post-Phase-7:
   guided workspace-creation flow" below.
-- ⬜ Full public page set from the brief (Features, How It Works,
-  Solutions sub-pages, Security page, About, Contact, FAQs, ToS, Privacy
-  Policy, Cookie Preferences) — only a homepage and a static pricing page
-  exist today
+- ✅⚠️ The brief's marketing pages — Features, How It Works, Solutions,
+  Security, and FAQ — are now built, see "Post-Phase-7: public marketing
+  pages" below. Still ⬜: About, Contact, ToS, Privacy Policy, Cookie
+  Preferences — deliberately left alone, since they need real company
+  information and legal review I can't supply, not just more copy.
 
 ## Phase 2 — Data Intelligence Engine
 
@@ -3039,6 +3040,79 @@ tenant).
   Separately picked "Something else" and confirmed the free-form
   Industry dropdown (defaulting to General Data Analysis) rendered
   exactly as the old form's did.
+
+## Post-Phase-7: public marketing pages
+
+Explicitly requested by the user after I flagged, in the prior round's
+own status summary, that the brief's public-page set needed
+product/brand-voice decisions rather than just engineering. Scoped to
+the pages that are pure product description — Features, How It Works,
+Solutions, Security, FAQ — deliberately excluding About, Contact, ToS,
+Privacy Policy, and Cookie Preferences, which need real company
+information (a legal entity name, a real address, an actual data-
+retention policy) and legal review, not copy I can respectably invent.
+
+- ✅ **Every claim on every new page was checked against the real
+  codebase before being written**, not recalled from memory — counted
+  the actual cleaning operations in `app/services/datasets.py` (11,
+  via `_apply_table_transformation`), the actual analytics tools in
+  `app/services/analytics.py` (7), the actual report endpoints in
+  `app/api/v1/routers/reports.py` (8), and the actual
+  `MembershipRole` enum values (5: owner, administrator, analyst,
+  viewer, auditor) — rather than trusting a plausible-sounding number.
+- ✅ **`/features`**: every built capability grouped by stage (upload &
+  clean, industry intelligence, AI analyst, reports & dashboards,
+  scenario modelling, team & collaboration) — no feature listed here
+  that isn't real and tested elsewhere in this document.
+- ✅ **`/how-it-works`**: the real six-step user journey, from creating
+  a workspace through to sharing a dashboard or scheduling a report.
+- ✅ **`/solutions`**: one detailed section per real industry pack
+  (Commercial Property, Residential Property & Lettings, Social
+  Housing & Asset Management, Business & Financial Intelligence) —
+  real KPI names, real `suggested_questions` text, and real report
+  template names, each checked against `app/core/industry_packs.py`
+  directly rather than paraphrased from memory. Explicitly honest
+  about the other industries (general, public sector, education,
+  operations & logistics): full analytics, no invented KPI pack.
+- ✅ **`/security`**: deliberately framed as "what's actually built,
+  described plainly — not a compliance checklist" and held to that:
+  every claim (bcrypt hashing, the httpOnly-cookie+CSRF refresh flow,
+  optional TOTP MFA, OIDC SSO, per-IP rate limiting, tenant isolation,
+  role-based access, revocable API keys, upload validation, audit
+  logging, HMAC-signed webhooks) is something this session actually
+  built and tested. No compliance-certification language anywhere
+  (no SOC 2, ISO, pentest, or uptime-SLA claims) — those aren't true
+  yet, so they aren't claimed.
+- ✅ **`/faq`**: nine questions, including one answered honestly rather
+  than left out — "does my data get sent to a third party when I use
+  the AI analyst?" — yes, to the AI provider, stated plainly rather
+  than glossed over.
+- ✅ **A real pre-existing inaccuracy found and fixed while working
+  nearby**: the homepage's "One engine. Every industry." section had
+  listed "Public Sector" as a featured solution with a confident
+  blurb ("Service demand, spend and outcomes across your area") even
+  though no `public_sector` industry pack has ever existed in
+  `app/core/industry_packs.py` — removed that card, and corrected two
+  other cards' blurbs that named KPIs the packs don't actually track
+  (Commercial Property's blurb claimed "NOI", a KPI that was never
+  built; Business & Finance's claimed "cash flow and customer trends",
+  neither of which is a tracked KPI — customer ranking exists only as
+  a report section, not a KPI).
+- ✅ **New `MarketingFooter` component** (`apps/web/src/components/`):
+  cross-links every marketing page, used on the homepage and all five
+  new pages — the homepage's own inline footer was replaced with it
+  for consistency rather than duplicating the same markup six times.
+  `NavBar` gained Features/Solutions/Security links (`flex-wrap` added
+  so the extra links don't clip on narrow viewports — confirmed at
+  375px).
+- ✅ Frontend: 36/36 passing (unchanged — no new pure logic; this is
+  static marketing content, not business logic).
+- ✅ **Verified live against a real running server**: loaded all five
+  new pages plus the updated homepage in the real browser preview and
+  confirmed each renders correctly, confirmed cross-links between
+  pages resolve (Solutions → Features, FAQ → Solutions, etc.), and
+  confirmed the widened NavBar wraps cleanly at a real 375px mobile
+  viewport instead of clipping.
 
 ## Known limitations in what's built
 
