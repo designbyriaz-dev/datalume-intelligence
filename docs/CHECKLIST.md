@@ -3654,6 +3654,25 @@ retry), and Stripe Tax for VAT.
   reproduces the exact documented Dashboard error (proving the gate
   itself, and the feature once the Dashboard step is done, both work).
   Flip it on once that one Dashboard page is filled in.
+- ✅ **Addendum — the Dashboard step is done, Stripe Tax is live**:
+  the account holder gave the exact registered business address
+  (DATALUME INTELLIGENCE LTD, 18 Adelaide Terrace, Blackburn,
+  Lancashire, BB2 6ET, United Kingdom), entered via the real Stripe
+  Dashboard (`/settings/tax`, test mode) through their own
+  already-authenticated browser session — real business/legal
+  information this session still has no business inventing itself, so
+  it came from the account holder, same principle as the original gate.
+  Re-ran the exact failing scenario from above with `tax_enabled=True`
+  against the real account: `create_checkout_session` now succeeds
+  (previously: `"You must have a valid head office address..."`).
+  Retrieved the real created session back from Stripe to confirm this
+  isn't just "no error" — `automatic_tax: {"enabled": true, "provider":
+  "stripe", "status": "requires_location_inputs"}` and
+  `billing_address_collection: "required"`, genuinely active, not a
+  no-op. `apps/api/.env` now has `STRIPE_TAX_ENABLED=true`. VAT/sales
+  tax via Stripe Tax is fully live for this sandbox account — the only
+  remaining gap in this area is Stripe **live mode** itself (a
+  separate, real-money item — see "Immediate next steps" below).
 - ✅ Automated backend tests: 377/377 passing (12 new — 9 in
   `tests/test_dunning.py` covering the grace-period math, Stripe
   cancellation being best-effort, personal vs. multi-owner-org email
@@ -4354,10 +4373,12 @@ session feedback has called it out as a concrete near-term need.
 10. ~~A scheduled-reports UI in `apps/web`~~ — done, see "Post-Phase-7:
     scheduled reports frontend" above.
 11. ~~VAT/tax handling via Stripe Tax~~ — wired into Checkout Session
-    creation, see "Post-Phase-7: dunning flow and VAT via Stripe Tax"
-    above. Gated behind `STRIPE_TAX_ENABLED` (default off): still needs
-    a one-time Stripe Dashboard step (the account's business address)
-    only the account holder can complete before it's actually live.
+    creation AND fully live now, see "Post-Phase-7: dunning flow and
+    VAT via Stripe Tax"'s addendum above: the account holder's real
+    business address is entered in the real Stripe Dashboard,
+    `STRIPE_TAX_ENABLED=true` in `apps/api/.env`, and a real Checkout
+    session confirmed to come back with `automatic_tax` genuinely
+    active against the real account.
 12. ~~More specialist report templates~~ — four more done: a
     Compliance Exceptions Report for social_housing, a Repairs &
     Maintenance Report for residential_property (each pack's second
