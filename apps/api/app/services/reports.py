@@ -877,6 +877,143 @@ def generate_residential_repairs_maintenance_report_pdf(
     return buffer.getvalue()
 
 
+def generate_public_sector_budget_variance_report_pdf(
+    *,
+    dataset_name: str,
+    table_sheet_name: str,
+    generated_by_name: str,
+    df: pl.DataFrame,
+    mapping: dict[str, str | None],
+    kpi_results: list[KPIResult],
+    compliance_caveat: str | None,
+) -> bytes:
+    """The seventh specialist report template, and the first report for
+    public_sector — one of the two packs docs/CHECKLIST.md's "Immediate
+    next steps" item 12 named as having real domain input and KPIs
+    (see "Post-Phase-7: public sector industry pack") but no report
+    template yet.
+
+    Two sections beyond the shared "Key metrics" table, each answering
+    one of the pack's own suggested_questions directly rather than
+    requiring the reader to compute it from the KPI table themselves:
+    a service-area breakdown (budget vs. actual vs. forecast, sorted by
+    budget size — "which service areas are forecast to overspend?")
+    and a row-level list of individual budget lines where the forecast
+    outturn exceeds the approved budget, sorted by overspend amount —
+    the same "exception list, not just an aggregate" principle as
+    generate_social_housing_compliance_exceptions_report_pdf above,
+    since a committee reading this needs to know *which* lines to act
+    on, not just the total variance. Includes the pack's own
+    compliance_caveat, like the social housing reports above — this is
+    the kind of report that could plausibly get forwarded to a
+    committee, so the "indicative only, confirm against your official
+    finance system" caveat matters here specifically."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm
+    )
+
+    story = []
+    story.append(Paragraph("Public Sector Budget Variance Report", _TITLE_STYLE))
+    story.append(
+        Paragraph(
+            f"{dataset_name} &mdash; {table_sheet_name}<br/>"
+            f"Generated {datetime.now(timezone.utc).strftime('%d %B %Y, %H:%M UTC')} by {generated_by_name}",
+            _META_STYLE,
+        )
+    )
+
+    if compliance_caveat:
+        caveat_style = ParagraphStyle(
+            "DLComplianceCaveat3",
+            parent=_STYLES["Normal"],
+            textColor=colors.HexColor("#92400e"),
+            backColor=colors.HexColor("#fffbeb"),
+            borderColor=colors.HexColor("#fcd34d"),
+            borderWidth=0.5,
+            borderPadding=8,
+            spaceAfter=16,
+        )
+        story.append(Paragraph(compliance_caveat, caveat_style))
+
+    story.append(Paragraph("Key metrics", _H2_STYLE))
+    kpi_rows = [["Metric", "Value"]]
+    for kpi in kpi_results:
+        kpi_rows.append([kpi.name, kpi.formatted if kpi.error is None else "Not available"])
+    story.append(_simple_table(kpi_rows, [9 * cm, 6 * cm]))
+
+    service_col = mapping.get("service_area")
+    line_col = mapping.get("budget_line")
+    budget_col = mapping.get("annual_budget")
+    actual_col = mapping.get("actual_spend")
+    forecast_col = mapping.get("forecast_outturn")
+
+    if service_col and budget_col:
+        agg_exprs = [pl.col(budget_col).sum().alias("budget")]
+        if actual_col:
+            agg_exprs.append(pl.col(actual_col).sum().alias("actual"))
+        if forecast_col:
+            agg_exprs.append(pl.col(forecast_col).sum().alias("forecast"))
+        breakdown = df.group_by(service_col).agg(agg_exprs).sort("budget", descending=True)
+
+        header = ["Service Area", "Annual Budget"]
+        if actual_col:
+            header.append("Actual Spend")
+        if forecast_col:
+            header.append("Forecast Outturn")
+        rows = [header]
+        for row in breakdown.to_dicts():
+            label = row[service_col] if row[service_col] is not None else "(missing)"
+            line = [str(label), f"£{row['budget']:,.2f}"]
+            if actual_col:
+                line.append(f"£{row['actual']:,.2f}" if row["actual"] is not None else "—")
+            if forecast_col:
+                line.append(f"£{row['forecast']:,.2f}" if row["forecast"] is not None else "—")
+            rows.append(line)
+        story.append(Paragraph("Budget, actual spend and forecast by service area", _H2_STYLE))
+        story.append(_simple_table(rows, [5 * cm] + [3.3 * cm] * (len(header) - 1)))
+
+    if line_col and budget_col and forecast_col:
+        overspends: list[tuple[str, str | None, float]] = []
+        select_cols = [line_col, budget_col, forecast_col] + ([service_col] if service_col else [])
+        for row in df.select(select_cols).to_dicts():
+            budget = row[budget_col]
+            forecast = row[forecast_col]
+            if budget is None or forecast is None or forecast <= budget:
+                continue
+            service = row[service_col] if service_col else None
+            overspends.append((str(row[line_col]), str(service) if service is not None else None, forecast - budget))
+        overspends.sort(key=lambda r: r[2], reverse=True)
+
+        story.append(Paragraph("Budget lines forecasting an overspend", _H2_STYLE))
+        if overspends:
+            header = ["Budget Line"] + (["Service Area"] if service_col else []) + ["Forecast Overspend"]
+            rows = [header]
+            for line, service, amount in overspends:
+                entry = [line]
+                if service_col:
+                    entry.append(service if service is not None else "(missing)")
+                entry.append(f"£{amount:,.2f}")
+                rows.append(entry)
+            col_widths = [6 * cm] + ([5 * cm] if service_col else []) + [4 * cm]
+            story.append(_simple_table(rows, col_widths))
+        else:
+            story.append(Paragraph("No budget lines are forecasting an overspend.", _BODY_STYLE))
+
+    story.append(Spacer(1, 20))
+    story.append(
+        Paragraph(
+            "Methodology: all figures are deterministic calculations over the uploaded data — see "
+            "app/services/industry_kpis.py for the exact formula behind each metric. This report "
+            "contains no AI-generated narrative or figures.",
+            ParagraphStyle("DLFootnote9", parent=_STYLES["Normal"], fontSize=7, textColor=colors.grey),
+        )
+    )
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
 EXECUTIVE_SUMMARY_SYSTEM_PROMPT = (
     "You are a financial analyst writing the executive summary section of a report for a "
     "business decision-maker. You will be given a table of KPIs already computed from the "

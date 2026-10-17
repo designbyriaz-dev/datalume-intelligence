@@ -27,6 +27,7 @@ from app.services.reports import (
     generate_commercial_property_report_pdf,
     generate_data_quality_report_pdf,
     generate_executive_intelligence_report_pdf,
+    generate_public_sector_budget_variance_report_pdf,
     generate_residential_property_report_pdf,
     generate_residential_repairs_maintenance_report_pdf,
     generate_social_housing_compliance_exceptions_report_pdf,
@@ -447,6 +448,70 @@ async def generate_residential_repairs_maintenance_report(
         id=report_id,
         dataset_table_id=table.id,
         report_type="residential_repairs_maintenance",
+        storage_key=storage_key,
+        file_size_bytes=len(pdf_bytes),
+        generated_by_user_id=current_user.id,
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+
+    await dispatch_event(
+        db,
+        http_client,
+        event_type="report.generated",
+        workspace_id=workspace.id,
+        payload={"report_id": report.id, "report_type": report.report_type, "dataset_table_id": table.id},
+    )
+
+    return report
+
+
+@router.post(
+    "/dataset-tables/{table_id}/reports/public-sector-budget-variance",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_public_sector_budget_variance_report(
+    table_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
+) -> Report:
+    table, _version, dataset, workspace = await get_table_chain_or_404(db, table_id)
+    await require_workspace_access(db, current_user.id, workspace)
+
+    pack = get_industry_pack(workspace.industry)
+    if pack is None or pack.industry_id != "public_sector":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "This report template is only available for public_sector workspaces.",
+        )
+
+    df = await get_dataset_table_dataframe(storage, table)
+    mapping = get_effective_field_mapping(table, pack, df.columns)
+    window_months = workspace.kpi_window_months or DEFAULT_KPI_WINDOW_MONTHS
+    kpi_results = compute_kpis(df, pack, mapping, as_of=dt.date.today(), window_months=window_months)
+
+    pdf_bytes = generate_public_sector_budget_variance_report_pdf(
+        dataset_name=dataset.name,
+        table_sheet_name=table.sheet_name,
+        generated_by_name=current_user.full_name,
+        df=df,
+        mapping=mapping,
+        kpi_results=kpi_results,
+        compliance_caveat=pack.compliance_caveat,
+    )
+
+    report_id = str(uuid.uuid4())
+    storage_key = f"workspaces/{workspace.id}/reports/{report_id}.pdf"
+    storage.write(storage_key, pdf_bytes)
+
+    report = Report(
+        id=report_id,
+        dataset_table_id=table.id,
+        report_type="public_sector_budget_variance",
         storage_key=storage_key,
         file_size_bytes=len(pdf_bytes),
         generated_by_user_id=current_user.id,

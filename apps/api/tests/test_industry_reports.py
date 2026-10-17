@@ -382,3 +382,82 @@ async def test_outsider_cannot_generate_business_finance_report(client: AsyncCli
         headers=_auth(outsider_token),
     )
     assert resp.status_code == 403
+
+
+# Same 7-service-area dataset as
+# test_industry_kpis.py::test_public_sector_kpis_are_numerically_correct
+# — A-F forecast to overspend, G forecast to underspend — so this report
+# has real content to render in both its "by service area" and "lines
+# forecasting an overspend" sections, not an all-empty edge case.
+PUBLIC_SECTOR_CSV = (
+    b"Service Area,Budget Line,Annual Budget,Actual Spend,Forecast Outturn\n"
+    b"A,Line 0,100,90,150\n"
+    b"B,Line 1,100,80,140\n"
+    b"C,Line 2,100,70,130\n"
+    b"D,Line 3,100,60,120\n"
+    b"E,Line 4,100,50,110\n"
+    b"F,Line 5,100,55,105\n"
+    b"G,Line 6,100,80,90\n"
+)
+
+
+async def _setup_public_sector_table(client: AsyncClient, token: str) -> str:
+    ws_resp = await client.post(
+        "/api/v1/workspaces", json={"name": "Public Sector Report Test", "industry": "public_sector"},
+        headers=_auth(token),
+    )
+    workspace_id = ws_resp.json()["id"]
+    files = {"file": ("data.csv", PUBLIC_SECTOR_CSV, "text/csv")}
+    upload_resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets",
+        data={"name": "Budget Monitoring"},
+        files=files,
+        headers=_auth(token),
+    )
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version["tables"][0]["id"]
+
+
+async def test_generate_and_download_public_sector_budget_variance_report(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "psowner@example.com")
+    table_id = await _setup_public_sector_table(client, token)
+
+    gen_resp = await client.post(
+        f"/api/v1/dataset-tables/{table_id}/reports/public-sector-budget-variance", headers=_auth(token)
+    )
+    assert gen_resp.status_code == 201, gen_resp.text
+    report = gen_resp.json()
+    assert report["report_type"] == "public_sector_budget_variance"
+    assert report["file_size_bytes"] > 0
+
+    download_resp = await client.get(f"/api/v1/reports/{report['id']}/download", headers=_auth(token))
+    assert download_resp.status_code == 200
+    assert download_resp.content.startswith(b"%PDF-")
+    assert len(download_resp.content) == report["file_size_bytes"]
+
+
+async def test_public_sector_budget_variance_report_rejected_for_wrong_industry(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "psowner2@example.com")
+    table_id = await _setup_table(client, token, "general")
+
+    resp = await client.post(
+        f"/api/v1/dataset-tables/{table_id}/reports/public-sector-budget-variance", headers=_auth(token)
+    )
+    assert resp.status_code == 400
+    assert "public_sector" in resp.json()["detail"]
+
+
+async def test_outsider_cannot_generate_public_sector_budget_variance_report(client: AsyncClient) -> None:
+    owner_token = await _register_and_login(client, "psowner3@example.com")
+    outsider_token = await _register_and_login(client, "psoutsider3@example.com")
+    table_id = await _setup_public_sector_table(client, owner_token)
+
+    resp = await client.post(
+        f"/api/v1/dataset-tables/{table_id}/reports/public-sector-budget-variance",
+        headers=_auth(outsider_token),
+    )
+    assert resp.status_code == 403

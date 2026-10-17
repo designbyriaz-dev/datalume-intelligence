@@ -424,7 +424,7 @@ PUBLIC_SECTOR = IndustryPack(
         "Cost Centre": "An organisational unit (e.g. a service area or directorate) that budget is allocated to and tracked against.",
         "Precept": "The amount a local authority (e.g. a parish or town council) adds to council tax to fund its own budget.",
     },
-    report_templates=(),
+    report_templates=("public_sector_budget_variance",),
     compliance_caveat=(
         "Budget monitoring figures are calculated from the data you uploaded and are indicative only — "
         "confirm against your authority's official finance system before reporting to committee or "

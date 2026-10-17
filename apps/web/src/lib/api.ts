@@ -934,6 +934,13 @@ export const api = {
       token
     ),
 
+  generatePublicSectorBudgetVarianceReport: (token: string, tableId: string) =>
+    request<ReportMeta>(
+      `/api/v1/dataset-tables/${tableId}/reports/public-sector-budget-variance`,
+      { method: "POST" },
+      token
+    ),
+
   generateExecutiveIntelligenceReport: (token: string, tableId: string) =>
     request<ReportMeta>(
       `/api/v1/dataset-tables/${tableId}/reports/executive-intelligence`,

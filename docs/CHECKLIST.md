@@ -4058,6 +4058,76 @@ self-contained fix.
   LLM call through a completely different code path than the one
   verified above.
 
+## Post-Phase-7: public sector budget variance report template
+
+Closes half of docs/CHECKLIST.md's "Immediate next steps" item 12: of
+the two packs named as having real domain input and KPIs but no report
+template yet (public_sector and education — see "Post-Phase-7: public
+sector industry pack" and "Post-Phase-7: education industry pack"
+above), this builds public_sector's. education's is still open.
+
+- ✅ **`generate_public_sector_budget_variance_report_pdf`**
+  (`app/services/reports.py`) — the seventh specialist report template,
+  following the exact pattern every prior one established: a "Key
+  metrics" table from the same `compute_kpis` engine `/industry-kpis`
+  uses, plus content genuinely new beyond the aggregate KPIs rather
+  than just re-presenting them. Two such sections, each answering one
+  of the pack's own `suggested_questions` directly: a budget/actual/
+  forecast breakdown by service area (sorted by budget size), and a
+  row-level list of individual budget lines where the forecast outturn
+  exceeds the approved budget, sorted by overspend amount descending —
+  the same "exception list a committee can act on, not just a total"
+  principle as `generate_social_housing_compliance_exceptions_report_pdf`.
+  Includes the pack's own `compliance_caveat` in a highlighted box,
+  since this is exactly the kind of report that could get forwarded to
+  a council committee.
+- ✅ **Wired through every layer that needed it**, mirroring every
+  prior report template exactly: `IndustryPack.report_templates` on
+  `PUBLIC_SECTOR` (`app/core/industry_packs.py`), a new
+  `POST /dataset-tables/{id}/reports/public-sector-budget-variance`
+  route (`app/api/v1/routers/reports.py`, 400 for a non-public_sector
+  workspace, 403 for an outsider — same checks as every other report
+  endpoint), the scheduled-reports registry (`REPORT_TYPE_REQUIRED_INDUSTRY`/
+  `_generate_report_bytes` in `app/services/scheduled_reports.py`, so
+  this report can be scheduled and emailed on a cadence like every
+  other industry report), and the frontend (`INDUSTRY_REPORTS`,
+  `INDUSTRY_REPORT_TYPES`, `REPORT_TYPE_LABELS` in
+  `apps/web/src/app/dashboard/workspaces/[id]/page.tsx`, plus the new
+  `api.generatePublicSectorBudgetVarianceReport` in `apps/web/src/lib/api.ts`).
+- ✅ Automated backend tests: 398/398 passing, 13 skipped (3 new test
+  functions, in `tests/test_industry_reports.py`, for the
+  generate/download/wrong-industry/outsider-403 flow — matching every
+  other report's test shape exactly. The new report_type was also
+  added as a case inside two existing cross-cutting tests in
+  `tests/test_scheduled_reports.py` that already enumerate every
+  industry report type
+  [`test_newly_supported_report_types_require_matching_industry`,
+  `test_scheduler_generates_each_industry_report_type`], so it's
+  covered there without adding new test functions. The 13 skips are
+  the MinIO and R2 real-infrastructure suites, which skip by design
+  without `MINIO_TEST_ENDPOINT`/`R2_TEST_*` env vars set — see
+  "Post-Phase-7: S3Storage verified against real MinIO" above.
+- ✅ Frontend typecheck: clean (`tsc --noEmit`).
+- ✅ **Verified live against a real running server — and, since
+  `apps/api/.env` now holds real Cloudflare R2 credentials (see
+  "Post-Phase-7: S3Storage verified against real MinIO"'s addendum
+  above), against the real R2 bucket, not local disk**: registered a
+  real account, created a real `public_sector` workspace, uploaded a
+  real 5-row budget CSV (3 service areas forecasting an overspend, 2
+  not), called the new endpoint, downloaded a real 3,348-byte PDF
+  (`file` confirmed "PDF document, version 1.4, 1 pages"), and
+  hand-checked every figure in it against the source CSV: totals
+  (£2,750,000 budget / £1,720,000 actual / £2,835,000 forecast),
+  variance (£85,000, 3.1%), utilisation (62.5%), over-budget line count
+  (3), top-5 overspend concentration (100%, since only 3 lines
+  overspend at all), the service-area table sorted correctly by budget
+  size, and the overspend-lines table sorted correctly by overspend
+  amount (Staffing/Adult Social Care £100,000 first) — all correct.
+  Cleaned up afterward: deleted the 3 real objects this run wrote to
+  the production R2 bucket (the source CSV, its parquet table, and the
+  report PDF) via a direct boto3 call, so no test litter was left
+  behind in real storage.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -4171,18 +4241,17 @@ self-contained fix.
     above. Gated behind `STRIPE_TAX_ENABLED` (default off): still needs
     a one-time Stripe Dashboard step (the account's business address)
     only the account holder can complete before it's actually live.
-12. ~~More specialist report templates~~ — two more done: a Compliance
-    Exceptions Report for social_housing and a Repairs & Maintenance
-    Report for residential_property (each pack's second report — see
-    "Post-Phase-7: fifth specialist report template" and "Post-Phase-7:
-    sixth specialist report template" above). Still open: Investment
-    Planning, Executive Intelligence, etc. — the pattern is now proven
-    six times; each remaining one is a template-writing task on top of
-    the existing KPI engine, attached to an existing pack as a second
-    (or third) report, or to a new pack — public_sector and education
-    both now have real domain input and KPIs (see "Post-Phase-7: public
-    sector industry pack" and "Post-Phase-7: education industry pack"
-    above) but neither has a report template yet.
+12. ~~More specialist report templates~~ — three more done: a
+    Compliance Exceptions Report for social_housing, a Repairs &
+    Maintenance Report for residential_property (each pack's second
+    report — see "Post-Phase-7: fifth specialist report template" and
+    "Post-Phase-7: sixth specialist report template" above), and a
+    Budget Variance Report for public_sector (its first report — see
+    "Post-Phase-7: public sector budget variance report template"
+    above). Still open: education still has no report template of its
+    own, and further second/third reports on existing packs (Investment
+    Planning, etc.) remain possible — the pattern is now proven seven
+    times.
 13. ~~A schema-confirmation UI for industry field mappings~~ — done, see
     "Post-Phase-7: industry field mapping confirmation" above.
 14. ~~Set `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`/`OIDC_DISCOVERY_URL` against
