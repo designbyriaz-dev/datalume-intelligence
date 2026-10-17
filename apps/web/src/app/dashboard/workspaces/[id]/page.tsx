@@ -2085,6 +2085,18 @@ function DatasetCard({
   const [busyTableId, setBusyTableId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const latestVersion = dataset.versions[dataset.versions.length - 1];
+  const isProcessing = latestVersion.status === "processing";
+
+  // Large uploads are parsed and profiled in the background (see
+  // finish_ingest_upload in app/services/datasets.py) — the version
+  // starts out "processing" with no tables yet, so poll until it
+  // flips to "ready" or "failed" instead of leaving the user looking
+  // at an upload that silently never shows its data.
+  useEffect(() => {
+    if (!isProcessing) return;
+    const interval = setInterval(onChanged, 2000);
+    return () => clearInterval(interval);
+  }, [isProcessing, onChanged]);
 
   const onDeduplicate = async (tableId: string) => {
     setError(null);
@@ -2112,6 +2124,18 @@ function DatasetCard({
       {dataset.versions.length > 1 && <CompareVersionsPanel dataset={dataset} token={token} />}
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+
+      {isProcessing && (
+        <p className="mt-4 text-sm text-slate-500">
+          Processing upload… this can take a moment for large files. This will update automatically.
+        </p>
+      )}
+      {latestVersion.status === "failed" && (
+        <p className="mt-4 text-sm text-red-600">
+          Could not process this upload
+          {latestVersion.error_message ? `: ${latestVersion.error_message}` : "."}
+        </p>
+      )}
 
       <div className="mt-4 space-y-4">
         {latestVersion.tables.map((table) => (
@@ -2511,8 +2535,9 @@ export default function WorkspaceDetailPage() {
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <p className="text-xs text-slate-500">
-            Max 50MB. Files are validated by content, not just extension, and profiled immediately —
-            no AI involved in this step, just deterministic parsing.
+            Max 50MB. Files are validated by content, not just extension, then parsed and profiled —
+            no AI involved in this step, just deterministic parsing. Large files finish in the
+            background; the page updates automatically once they're ready.
           </p>
         </form>
 

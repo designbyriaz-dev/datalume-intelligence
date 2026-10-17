@@ -39,7 +39,12 @@ async def _setup_workspace_and_table(client: AsyncClient, token: str, content: b
     upload_resp = await client.post(
         f"/api/v1/workspaces/{workspace_id}/datasets", data={"name": "Data"}, files=files, headers=_auth(token)
     )
-    return workspace_id, upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return workspace_id, version["tables"][0]["id"]
 
 
 async def test_get_field_mapping_reports_automatic_match_and_unconfirmed(client: AsyncClient) -> None:
@@ -171,7 +176,12 @@ async def test_field_mapping_rejected_for_workspace_without_industry_pack(client
     upload_resp = await client.post(
         f"/api/v1/workspaces/{workspace_id}/datasets", data={"name": "Data"}, files=files, headers=_auth(token)
     )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    table_id = version["tables"][0]["id"]
 
     resp = await client.get(f"/api/v1/dataset-tables/{table_id}/field-mapping", headers=_auth(token))
     assert resp.status_code == 400

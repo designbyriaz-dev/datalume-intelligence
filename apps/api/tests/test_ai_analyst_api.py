@@ -47,12 +47,12 @@ async def _setup_dataset_and_table(client: AsyncClient, token: str) -> tuple[str
         files=files,
         headers=_auth(token),
     )
-    body = upload_resp.json()
-    table_id = body["tables"][0]["id"]
-
-    dataset_id = (
-        await client.get(f"/api/v1/workspaces/{workspace_id}/datasets", headers=_auth(token))
-    ).json()[0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    table_id = version["tables"][0]["id"]
     return dataset_id, table_id
 
 

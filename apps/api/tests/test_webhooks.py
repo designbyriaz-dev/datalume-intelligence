@@ -160,7 +160,12 @@ async def test_report_generation_triggers_webhook(client: AsyncClient) -> None:
         files=files,
         headers=_auth(token),
     )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    table_id = version["tables"][0]["id"]
 
     recorder = _RecordingTransport()
     recorder.override()

@@ -38,6 +38,42 @@ SAMPLE_CSV = (
 )
 
 
+async def _upload_and_get_ready_version(
+    client: AsyncClient,
+    token: str,
+    workspace_id: str,
+    filename: str,
+    content: bytes,
+    content_type: str = "text/csv",
+    name: str = "Data",
+) -> dict:
+    """Uploads a file and returns the fully-processed DatasetVersion
+    dict (status="ready", tables populated) — not the raw POST response,
+    which now only reflects status="processing" with no tables yet,
+    since parsing/profiling happens in a background task scheduled by
+    the endpoint (see finish_ingest_upload in app/services/datasets.py).
+    No retry loop needed here: confirmed empirically that Starlette
+    runs BackgroundTasks before the ASGI call itself returns, so under
+    this client's in-process ASGITransport the background task has
+    already completed by the time client.post() returns — this is a
+    single immediate re-fetch, not polling."""
+    files = {"file": (filename, content, content_type)}
+    upload_resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets",
+        data={"name": name},
+        files=files,
+        headers=_auth(token),
+    )
+    assert upload_resp.status_code == 201, upload_resp.text
+    assert upload_resp.json()["status"] == "processing"
+    dataset_id = upload_resp.json()["dataset_id"]
+
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version
+
+
 def _build_sample_xlsx(sheets: dict[str, list[list]]) -> bytes:
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -54,17 +90,10 @@ async def test_upload_csv_profiles_correctly(client: AsyncClient) -> None:
     token = await _register_and_login(client, "owner@example.com")
     workspace_id = await _create_personal_workspace(client, token)
 
-    files = {"file": ("rent_roll.csv", SAMPLE_CSV, "text/csv")}
-    resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Rent Roll"},
-        files=files,
-        headers=_auth(token),
+    body = await _upload_and_get_ready_version(
+        client, token, workspace_id, "rent_roll.csv", SAMPLE_CSV, name="Rent Roll"
     )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
     assert body["version_number"] == 1
-    assert body["status"] == "ready"
     assert len(body["tables"]) == 1
 
     table = body["tables"][0]
@@ -83,6 +112,68 @@ async def test_upload_csv_profiles_correctly(client: AsyncClient) -> None:
     issue_types = {i["issue_type"] for i in profile["issues"]}
     assert "duplicate_rows" in issue_types
     assert "missing_values" in issue_types
+
+
+async def test_upload_returns_processing_immediately_then_becomes_ready(client: AsyncClient) -> None:
+    """The actual async behaviour, not just the end state: the raw POST
+    response must reflect status="processing" with no tables yet — it's
+    serialized before finish_ingest_upload (the background task) runs,
+    only after the response is sent. Everything else in this file uses
+    _upload_and_get_ready_version, which deliberately re-fetches instead
+    of asserting on this raw response, exactly because of this."""
+    token = await _register_and_login(client, "asyncupload@example.com")
+    workspace_id = await _create_personal_workspace(client, token)
+
+    files = {"file": ("data.csv", SAMPLE_CSV, "text/csv")}
+    resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets",
+        data={"name": "Data"},
+        files=files,
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "processing"
+    assert body["tables"] == []
+    assert body["dataset_id"]
+
+    detail = (await client.get(f"/api/v1/datasets/{body['dataset_id']}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["id"] == body["id"]
+    assert version["status"] == "ready"
+    assert len(version["tables"]) == 1
+
+
+async def test_upload_with_unparseable_content_ends_up_failed(client: AsyncClient) -> None:
+    """Structural validation (extension, magic bytes, size) still
+    happens synchronously and still 400s outright — see
+    test_upload_rejects_disguised_file/test_upload_rejects_oversized_file
+    above, both unchanged. A file that LOOKS like a valid CSV but can't
+    actually be parsed is a different failure mode: it passes
+    validate_upload (nothing structurally wrong with it) and only fails
+    once finish_ingest_upload actually tries to parse it — now that
+    parsing is deferred, this can no longer be a 400; it has to surface
+    as DatasetVersionStatus.FAILED on the version instead, since there's
+    no HTTP response left to turn an exception into by the time it's
+    discovered."""
+    token = await _register_and_login(client, "failedupload@example.com")
+    workspace_id = await _create_personal_workspace(client, token)
+
+    files = {"file": ("blank.csv", b"\n\n\n", "text/csv")}
+    resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets",
+        data={"name": "Blank"},
+        files=files,
+        headers=_auth(token),
+    )
+    assert resp.status_code == 201, resp.text
+    dataset_id = resp.json()["dataset_id"]
+
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "failed"
+    assert version["error_message"]
+    assert version["tables"] == []
 
 
 def _build_invalid_values_csv() -> bytes:
@@ -106,15 +197,10 @@ async def test_upload_distinguishes_invalid_values_from_missing(client: AsyncCli
     token = await _register_and_login(client, "invalidvalues@example.com")
     workspace_id = await _create_personal_workspace(client, token)
 
-    files = {"file": ("scores.csv", _build_invalid_values_csv(), "text/csv")}
-    resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Scores"},
-        files=files,
-        headers=_auth(token),
+    version = await _upload_and_get_ready_version(
+        client, token, workspace_id, "scores.csv", _build_invalid_values_csv(), name="Scores"
     )
-    assert resp.status_code == 201, resp.text
-    profile = resp.json()["tables"][0]["profile"]
+    profile = version["tables"][0]["profile"]
     columns_by_name = {c["name"]: c for c in profile["columns"]}
 
     score = columns_by_name["score"]
@@ -188,22 +274,16 @@ async def test_upload_multisheet_xlsx_creates_one_table_per_sheet(client: AsyncC
             "Arrears": [["unit", "owed"], ["A1", 0], ["A2", 450]],
         }
     )
-    files = {
-        "file": (
-            "portfolio.xlsx",
-            content,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    }
-    resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Portfolio"},
-        files=files,
-        headers=_auth(token),
+    version = await _upload_and_get_ready_version(
+        client,
+        token,
+        workspace_id,
+        "portfolio.xlsx",
+        content,
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        name="Portfolio",
     )
-    assert resp.status_code == 201, resp.text
-    body = resp.json()
-    sheet_names = {t["sheet_name"] for t in body["tables"]}
+    sheet_names = {t["sheet_name"] for t in version["tables"]}
     assert sheet_names == {"Tenants", "Arrears"}
 
 
@@ -211,14 +291,8 @@ async def test_confirm_schema_updates_confirmed_types(client: AsyncClient) -> No
     token = await _register_and_login(client, "owner5@example.com")
     workspace_id = await _create_personal_workspace(client, token)
 
-    files = {"file": ("data.csv", SAMPLE_CSV, "text/csv")}
-    upload_resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Data"},
-        files=files,
-        headers=_auth(token),
-    )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    version = await _upload_and_get_ready_version(client, token, workspace_id, "data.csv", SAMPLE_CSV)
+    table_id = version["tables"][0]["id"]
 
     ok_resp = await client.patch(
         f"/api/v1/dataset-tables/{table_id}/schema",
@@ -248,19 +322,9 @@ async def test_deduplicate_creates_new_version_and_preserves_original(client: As
     token = await _register_and_login(client, "owner6@example.com")
     workspace_id = await _create_personal_workspace(client, token)
 
-    files = {"file": ("data.csv", SAMPLE_CSV, "text/csv")}
-    upload_resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Data"},
-        files=files,
-        headers=_auth(token),
-    )
-    upload_body = upload_resp.json()
-    table_id = upload_body["tables"][0]["id"]
-    dataset_id_resp = await client.get(
-        f"/api/v1/workspaces/{workspace_id}/datasets", headers=_auth(token)
-    )
-    dataset_id = dataset_id_resp.json()[0]["id"]
+    version = await _upload_and_get_ready_version(client, token, workspace_id, "data.csv", SAMPLE_CSV)
+    table_id = version["tables"][0]["id"]
+    dataset_id = version["dataset_id"]
 
     dedupe_resp = await client.post(
         f"/api/v1/dataset-tables/{table_id}/deduplicate", headers=_auth(token)
@@ -316,14 +380,10 @@ async def test_get_dataset_table_returns_profile(client: AsyncClient) -> None:
     token = await _register_and_login(client, "ownertable@example.com")
     workspace_id = await _create_personal_workspace(client, token)
 
-    files = {"file": ("rent_roll.csv", SAMPLE_CSV, "text/csv")}
-    upload_resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Rent Roll"},
-        files=files,
-        headers=_auth(token),
+    version = await _upload_and_get_ready_version(
+        client, token, workspace_id, "rent_roll.csv", SAMPLE_CSV, name="Rent Roll"
     )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    table_id = version["tables"][0]["id"]
 
     resp = await client.get(f"/api/v1/dataset-tables/{table_id}", headers=_auth(token))
     assert resp.status_code == 200, resp.text
@@ -345,14 +405,8 @@ async def test_outsider_cannot_get_dataset_table(client: AsyncClient) -> None:
     outsider_token = await _register_and_login(client, "outsidertable3@example.com")
     workspace_id = await _create_personal_workspace(client, owner_token)
 
-    files = {"file": ("data.csv", SAMPLE_CSV, "text/csv")}
-    upload_resp = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/datasets",
-        data={"name": "Data"},
-        files=files,
-        headers=_auth(owner_token),
-    )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    version = await _upload_and_get_ready_version(client, owner_token, workspace_id, "data.csv", SAMPLE_CSV)
+    table_id = version["tables"][0]["id"]
 
     resp = await client.get(f"/api/v1/dataset-tables/{table_id}", headers=_auth(outsider_token))
     assert resp.status_code == 403

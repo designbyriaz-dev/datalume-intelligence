@@ -28,12 +28,24 @@ async def _create_personal_workspace(client: AsyncClient, token: str) -> str:
 
 
 async def _upload_csv(client: AsyncClient, token: str, workspace_id: str, name: str, content: bytes) -> str:
+    """Parsing/profiling now happen in a background task after the
+    upload response is sent (see finish_ingest_upload in
+    app/services/datasets.py) — that response's own tables list is
+    always empty, so this re-fetches the dataset to find the table the
+    background task already created by the time the upload response
+    was received (confirmed: Starlette runs BackgroundTasks before
+    client.post() returns, even under this test's in-process transport
+    — no retry loop needed here)."""
     files = {"file": ("data.csv", content, "text/csv")}
     resp = await client.post(
         f"/api/v1/workspaces/{workspace_id}/datasets", data={"name": name}, files=files, headers=_auth(token)
     )
     assert resp.status_code == 201, resp.text
-    return resp.json()["tables"][0]["id"]
+    dataset_id = resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version["tables"][0]["id"]
 
 
 def _columns_by_name(version_body: dict) -> dict:

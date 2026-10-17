@@ -30,7 +30,7 @@ Settings.model_config["env_file"] = None
 
 from app.api.deps import get_object_storage  # noqa: E402
 from app.db.base import Base  # noqa: E402
-from app.db.session import get_db  # noqa: E402
+from app.db.session import get_db, get_session_factory  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.storage import LocalFilesystemStorage, ObjectStorage  # noqa: E402
 
@@ -57,11 +57,19 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    # A FastAPI BackgroundTasks callback (e.g. finish_ingest_upload)
+    # can't use the request-scoped get_db override above — that
+    # session is already closed by the time it runs. It opens its own
+    # via get_session_factory instead, which needs the same override:
+    # without this, a background task would silently write to the real
+    # production-config engine rather than this test's isolated one.
+    app.dependency_overrides[get_session_factory] = lambda: session_maker
 
     async with session_maker() as session:
         yield session
 
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_session_factory, None)
     await engine.dispose()
 
 

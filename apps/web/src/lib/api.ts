@@ -176,11 +176,13 @@ export interface DatasetTable {
 
 export interface DatasetVersion {
   id: string;
+  dataset_id: string;
   version_number: number;
   status: string;
   source_filename: string | null;
   file_size_bytes: number | null;
   derived_from_version_id: string | null;
+  error_message: string | null;
   tables: DatasetTable[];
 }
 

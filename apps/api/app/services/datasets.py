@@ -8,7 +8,7 @@ from dataclasses import asdict
 
 import polars as pl
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import get_settings
 from app.models.dataset import (
@@ -56,11 +56,25 @@ async def ingest_upload(
     filename: str,
     content: bytes,
     user_id: str,
-) -> DatasetVersion:
-    """Validate, parse and profile an uploaded file, then persist it as a
-    new DatasetVersion (creating the parent Dataset if one wasn't passed
-    in). Raises DatasetServiceError on any validation/parsing failure —
-    nothing is written to the database or object storage in that case."""
+) -> tuple[DatasetVersion, str]:
+    """Validates and stores the raw upload, then persists it as a new
+    DatasetVersion with status=PROCESSING (creating the parent Dataset if
+    one wasn't passed in). Returns immediately once the file is safely
+    written — parsing and profiling (the expensive part for a large
+    file) are NOT done here anymore; the router schedules
+    finish_ingest_upload as a background task for that, so the HTTP
+    response doesn't wait on it. Raises DatasetServiceError only for a
+    structural validation failure (bad extension, size cap, a disguised
+    file) — those are still checked synchronously since they're cheap
+    and should reject the request outright, not leave a PROCESSING
+    version sitting around that's doomed to fail. A parsing failure
+    (corrupt CSV/XLSX content) is no longer raised here — it surfaces
+    later as DatasetVersionStatus.FAILED, since parsing itself is now
+    deferred.
+
+    Returns (version, extension) — the extension is needed by the
+    caller to schedule finish_ingest_upload, and re-deriving it from the
+    filename a second time would duplicate validate_upload's logic."""
 
     settings = get_settings()
 
@@ -68,16 +82,6 @@ async def ingest_upload(
         validated = validate_upload(filename, content, settings.max_upload_size_bytes)
     except UploadValidationError as exc:
         raise DatasetServiceError(str(exc)) from exc
-
-    try:
-        tables, invalid_value_counts = parse_upload(validated.extension, validated.content)
-    except ParsingError as exc:
-        raise DatasetServiceError(str(exc)) from exc
-
-    profiles = {
-        sheet_name: profile_table(sheet_name, df, invalid_value_counts.get(sheet_name))
-        for sheet_name, df in tables.items()
-    }
 
     if dataset is None:
         dataset = Dataset(workspace_id=workspace_id, name=dataset_name, created_by_user_id=user_id)
@@ -94,39 +98,92 @@ async def ingest_upload(
         id=version_id,
         dataset_id=dataset.id,
         version_number=version_number,
-        status=DatasetVersionStatus.READY,
+        status=DatasetVersionStatus.PROCESSING,
         source_filename=filename,
         storage_key=source_key,
         file_size_bytes=len(content),
         created_by_user_id=user_id,
     )
     db.add(version)
-    await db.flush()
-
-    for sheet_name, df in tables.items():
-        table_profile = profiles[sheet_name]
-        parquet_buffer = io.BytesIO()
-        df.write_parquet(parquet_buffer)
-        data_key = (
-            f"workspaces/{workspace_id}/datasets/{dataset.id}/versions/{version_id}/"
-            f"tables/{_slugify(sheet_name)}.parquet"
-        )
-        storage.write(data_key, parquet_buffer.getvalue())
-
-        db.add(
-            DatasetTable(
-                dataset_version_id=version.id,
-                sheet_name=sheet_name,
-                row_count=table_profile.row_count,
-                column_count=table_profile.column_count,
-                profile=_profile_to_dict(table_profile),
-                data_storage_key=data_key,
-            )
-        )
-
     await db.commit()
     await db.refresh(version)
-    return version
+    return version, validated.extension
+
+
+async def finish_ingest_upload(
+    *,
+    version_id: str,
+    workspace_id: str,
+    dataset_id: str,
+    extension: str,
+    storage: ObjectStorage,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """The background half of ingest_upload, scheduled via FastAPI's
+    BackgroundTasks — runs after the upload response has already been
+    sent. Parses and profiles the stored file and creates its
+    DatasetTable row(s), then flips the version to READY. On any
+    failure, flips it to FAILED with error_message set instead of
+    raising — this runs outside the request/response cycle, so there's
+    no HTTP response left to turn an exception into; the version's own
+    status is the only way a client finds out something went wrong.
+
+    Opens its own DB session rather than taking one as a parameter —
+    the request's session is already closed by the time a background
+    task actually runs (confirmed empirically: Starlette executes
+    BackgroundTasks after the response body is built, but still before
+    control returns to the caller of the ASGI app — i.e. before
+    client.post() returns, even in tests). Takes session_factory as a
+    parameter — app.db.session.get_session_factory — rather than
+    importing the module-level AsyncSessionLocal directly: the test
+    suite overrides get_db with a session bound to a separate, per-test
+    engine, and a hardcoded import would silently write to a different
+    database than the one the test actually reads from (caught by a
+    real test failure: the version sat at "processing" forever from the
+    test's perspective even though the background task itself had
+    already run and committed — just to the wrong database)."""
+    async with session_factory() as db:
+        version = await db.get(DatasetVersion, version_id)
+        if version is None:
+            return  # deleted before processing got to it — nothing to update
+
+        try:
+            content = storage.read(version.storage_key)
+            tables, invalid_value_counts = parse_upload(extension, content)
+
+            for sheet_name, df in tables.items():
+                table_profile = profile_table(sheet_name, df, invalid_value_counts.get(sheet_name))
+                parquet_buffer = io.BytesIO()
+                df.write_parquet(parquet_buffer)
+                data_key = (
+                    f"workspaces/{workspace_id}/datasets/{dataset_id}/versions/{version_id}/"
+                    f"tables/{_slugify(sheet_name)}.parquet"
+                )
+                storage.write(data_key, parquet_buffer.getvalue())
+
+                db.add(
+                    DatasetTable(
+                        dataset_version_id=version.id,
+                        sheet_name=sheet_name,
+                        row_count=table_profile.row_count,
+                        column_count=table_profile.column_count,
+                        profile=_profile_to_dict(table_profile),
+                        data_storage_key=data_key,
+                    )
+                )
+            version.status = DatasetVersionStatus.READY
+        except ParsingError as exc:
+            version.status = DatasetVersionStatus.FAILED
+            version.error_message = str(exc)[:2000]
+        except Exception as exc:  # noqa: BLE001 — see docstring: no response left to raise into
+            # Anything unexpected (a storage read failure, a profiling
+            # bug) still has to land the version in a terminal state —
+            # left as PROCESSING forever otherwise, with no way for a
+            # client to ever find out.
+            version.status = DatasetVersionStatus.FAILED
+            version.error_message = f"Unexpected error while processing this upload: {exc}"[:2000]
+
+        await db.commit()
 
 
 async def get_dataset_table_dataframe(storage: ObjectStorage, table: DatasetTable) -> pl.DataFrame:

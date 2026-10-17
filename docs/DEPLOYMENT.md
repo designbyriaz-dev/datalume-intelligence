@@ -108,11 +108,16 @@ allow-list need to sign in) is a separate, unstarted step.
 - The API itself is stateless (all state is in Postgres/object storage),
   so horizontal scaling of the API process is architecturally fine —
   **except** for the in-process scheduler caveat above.
-- Background/async processing for large file uploads doesn't exist yet
-  (uploads are handled synchronously in the request) — see
-  docs/CHECKLIST.md's Phase 2 notes. This matters more for scaling than
-  the API's own statelessness: a large upload ties up a worker for the
-  whole processing time.
+- Large file uploads are processed via a FastAPI `BackgroundTasks`
+  callback (see docs/CHECKLIST.md's "Post-Phase-7: async upload
+  processing" section), so the HTTP response returns immediately — but
+  the parsing/profiling work still runs afterward in the same API
+  process, not a separate worker. A large upload no longer holds open
+  the client's own request, but it still occupies that API worker's
+  event loop for the whole processing time, which can delay other
+  requests that worker is handling concurrently. A real job queue
+  (Celery/RQ against the already-provisioned Redis) would be the next
+  step if this becomes a bottleneck under real concurrent load.
 - The 7 auth endpoints (`/register`, `/login`, `/verify-email`,
   `/reset-password`, `/resend-verification`, `/forgot-password`, plus
   `/refresh` which is deliberately exempt — it already requires a valid

@@ -38,6 +38,22 @@ async def _upload(client: AsyncClient, token: str, workspace_id: str, name: str,
     )
 
 
+async def _ready_table_id(client: AsyncClient, token: str, upload_resp) -> str:
+    """Parsing/profiling now happen in a background task after the
+    upload response is sent (see finish_ingest_upload in
+    app/services/datasets.py) — that response's own tables list is
+    always empty, so this re-fetches the dataset to find the table the
+    background task already created by the time upload_resp was
+    received (confirmed: Starlette runs BackgroundTasks before
+    client.post() returns, even under this test's in-process
+    transport — no retry loop needed here)."""
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version["tables"][0]["id"]
+
+
 async def test_plans_endpoint_is_public_and_lists_all_plans(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/billing/plans")
     assert resp.status_code == 200
@@ -71,7 +87,7 @@ async def test_analyze_consumes_quota_and_blocks_once_exhausted(client: AsyncCli
     token = await _register_and_login(client, "owner2@example.com")
     workspace_id = await _create_workspace(client, token)
     upload_resp = await _upload(client, token, workspace_id, "Data")
-    table_id = upload_resp.json()["tables"][0]["id"]
+    table_id = await _ready_table_id(client, token, upload_resp)
 
     # Free plan allows 3 analyses/month.
     for i in range(3):
@@ -98,7 +114,7 @@ async def test_failed_analysis_does_not_consume_quota(client: AsyncClient) -> No
     token = await _register_and_login(client, "owner3@example.com")
     workspace_id = await _create_workspace(client, token)
     upload_resp = await _upload(client, token, workspace_id, "Data")
-    table_id = upload_resp.json()["tables"][0]["id"]
+    table_id = await _ready_table_id(client, token, upload_resp)
 
     # Unknown column -> 400, should not cost a unit of quota.
     bad_resp = await client.post(

@@ -1,12 +1,12 @@
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_http_client, get_object_storage
 from app.api.resolvers import get_dataset_or_404, get_table_chain_or_404, get_workspace_or_404
-from app.db.session import get_db
+from app.db.session import get_db, get_session_factory
 from app.models.dataset import Dataset, DatasetVersion
 from app.models.user import User
 from app.schemas.dataset import (
@@ -42,6 +42,7 @@ from app.services.datasets import (
     apply_split_column,
     apply_standardize_column,
     apply_unpivot,
+    finish_ingest_upload,
     get_dataset_table_dataframe,
     get_table_for_version,
     ingest_upload,
@@ -62,6 +63,7 @@ VALID_COLUMN_TYPES = {"integer", "float", "boolean", "date", "datetime", "text"}
 )
 async def upload_dataset(
     workspace_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     dataset_id: str | None = Form(default=None),
     name: str | None = Form(default=None),
@@ -69,6 +71,7 @@ async def upload_dataset(
     db: AsyncSession = Depends(get_db),
     storage: ObjectStorage = Depends(get_object_storage),
     http_client: httpx.AsyncClient = Depends(get_http_client),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
 ) -> DatasetVersion:
     workspace = await get_workspace_or_404(db, workspace_id)
     await require_workspace_write_access(db, current_user.id, workspace)
@@ -90,7 +93,7 @@ async def upload_dataset(
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, str(exc)) from exc
 
     try:
-        version = await ingest_upload(
+        version, extension = await ingest_upload(
             db,
             storage,
             workspace_id=workspace_id,
@@ -102,6 +105,22 @@ async def upload_dataset(
         )
     except DatasetServiceError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    # The file is safely stored and the version row exists (status
+    # PROCESSING) by this point — parsing and profiling (the expensive
+    # part for a large file) happen after this response is sent, not
+    # before it. The client sees status="processing" and an empty
+    # tables list, and is expected to re-fetch once it flips to "ready"
+    # (or "failed", with error_message set).
+    background_tasks.add_task(
+        finish_ingest_upload,
+        version_id=version.id,
+        workspace_id=workspace_id,
+        dataset_id=version.dataset_id,
+        extension=extension,
+        storage=storage,
+        session_factory=session_factory,
+    )
 
     await dispatch_event(
         db,

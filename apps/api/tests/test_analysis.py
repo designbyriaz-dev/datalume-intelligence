@@ -42,7 +42,12 @@ async def _setup_table(client: AsyncClient, token: str) -> str:
         files=files,
         headers=_auth(token),
     )
-    return upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version["tables"][0]["id"]
 
 
 async def test_list_tools_returns_registry(client: AsyncClient) -> None:

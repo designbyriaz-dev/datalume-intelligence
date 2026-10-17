@@ -35,7 +35,12 @@ async def _setup_table(client: AsyncClient, token: str) -> tuple[str, str]:
         files=files,
         headers=_auth(token),
     )
-    return workspace_id, upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return workspace_id, version["tables"][0]["id"]
 
 
 async def test_create_and_list_saved_scenario(client: AsyncClient) -> None:

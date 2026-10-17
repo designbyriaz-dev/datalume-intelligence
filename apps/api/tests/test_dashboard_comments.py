@@ -40,7 +40,12 @@ async def _setup_dashboard_in_org(client: AsyncClient, owner_token: str, member_
         files=files,
         headers=_auth(owner_token),
     )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(owner_token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    table_id = version["tables"][0]["id"]
 
     dashboard_resp = await client.post(
         f"/api/v1/workspaces/{workspace_id}/dashboards",
@@ -125,7 +130,12 @@ async def test_outsider_cannot_comment_or_read_comments(client: AsyncClient) -> 
         files=files,
         headers=_auth(owner_token),
     )
-    table_id = upload_resp.json()["tables"][0]["id"]
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(owner_token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    table_id = version["tables"][0]["id"]
     dashboard_resp = await client.post(
         f"/api/v1/workspaces/{workspace_id}/dashboards",
         json={"name": "D", "dataset_table_id": table_id},

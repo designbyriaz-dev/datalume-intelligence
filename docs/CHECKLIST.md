@@ -1,6 +1,6 @@
 # Feature completion checklist
 
-Status as of 2026-10-13. All 7 of the brief's phases are complete, plus
+Status as of 2026-10-17. All 7 of the brief's phases are complete, plus
 a substantial round of post-Phase-7 work (see the "Post-Phase-7:" ✅
 sections throughout this document — transactional email, 7 more
 cleaning operations completing the brief's entire list, S3Storage
@@ -160,10 +160,9 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   which Polars would infer as text and never exercise this path) through
   the real API, and confirmed live in the browser: the workspace page's
   per-column table shows a distinct "Invalid" count next to "Missing".
-- ⬜ Async/background processing for large files — uploads are processed
-  synchronously in the request. Fine for the brief's ~30s small-file
-  target; large files will block the request. Redis is in
-  docker-compose but no worker process consumes it yet.
+- ✅ Async/background processing for large files — uploads no longer parse
+  and profile synchronously in the request; see "Post-Phase-7: async
+  upload processing (background task)" below.
 - ⬜ Real malware/AV scanning (`MALWARE_SCANNING_ENABLED` is a documented
   no-op flag, not a scanner — see docs/SECURITY.md). Structural
   validation (magic bytes, zip-bomb guard) is real; antivirus is not.
@@ -3272,6 +3271,101 @@ what this round actually does.
   and `npm run build` both still clean — test files are correctly
   excluded from the production route output.
 
+## Post-Phase-7: async upload processing (background task)
+
+The user picked this explicitly, scoped deliberately to the lightweight
+option: a FastAPI `BackgroundTasks` callback in the existing API
+process, not a full job queue with a separate worker (Celery/RQ) — no
+new infrastructure, even though `redis_url` has sat unused in
+`app/core/config.py` since Phase 2 for exactly that heavier option.
+
+- ✅ **Upload response returns immediately; parsing/profiling moved to
+  a background task.** `POST .../datasets` now does only the cheap,
+  synchronous part (validate, store the raw file, create a
+  `DatasetVersion` row with `status=PROCESSING`) and returns in
+  milliseconds — confirmed on the real local server: a 4.3MB/90,000-row
+  CSV upload returned in 79ms. The actual parse → profile → write
+  Parquet → mark `READY`/`FAILED` work happens afterward in
+  `finish_ingest_upload` (`app/services/datasets.py`), scheduled via
+  `background_tasks.add_task(...)` in the router.
+- 🐛 **Found and fixed a real production/test database-mismatch bug**
+  while building this: a `BackgroundTasks` callback runs after the
+  request's own `db: AsyncSession` has already closed, so it needs to
+  open its own session — the first version of `finish_ingest_upload`
+  did this by importing the module-level `AsyncSessionLocal` directly
+  from `app/db/session.py`. That's bound to the production-config
+  engine. The test suite's `db_session` fixture creates its own
+  isolated in-memory SQLite engine and overrides `get_db` for the
+  request-scoped session, but never touches a hardcoded
+  `AsyncSessionLocal` import — so the background task's writes were
+  landing in the wrong database entirely. Not a timing bug; a genuine
+  wrong-database bug that would have mattered in any deployment with
+  per-environment session wiring, caught by a test assertion
+  (`status == "ready"`) that stayed `"processing"` forever. Fixed
+  properly, not papered over with a retry loop: added an overridable
+  `get_session_factory()` dependency to `app/db/session.py`, threaded
+  it through the router (`Depends(get_session_factory)`) and into
+  `finish_ingest_upload`'s own signature, and overrode it in
+  `tests/conftest.py`'s `db_session` fixture exactly the way `get_db`
+  already is — the same dependency-injection pattern this codebase
+  already uses everywhere else for test isolation.
+- ✅ **Failure is now visible, not silent**: a file that fails to parse
+  (confirmed with a real content that triggers `ParsingError` — three
+  bare newlines, empty-CSV) now lands the version in `status=FAILED`
+  with `error_message` set, instead of the request itself raising a
+  500. `DatasetVersionStatus.FAILED` and `DatasetVersion.error_message`
+  already existed in the model from an earlier phase, unused until now.
+- ✅ **`DatasetVersionOut` schema gained `dataset_id` and
+  `error_message`** so the frontend can poll a specific version and
+  render its failure reason without a second round-trip.
+- ✅ **Frontend**: `DatasetCard` (`workspaces/[id]/page.tsx`) now shows
+  a "Processing upload…" banner while `status === "processing"`, polls
+  every 2 seconds only while processing (confirmed via
+  `read_network_requests` against the real server: an already-`ready`
+  dataset triggers no polling loop at all — the interval only starts
+  when there's actually something to wait for), and shows a red "Could
+  not process this upload: {error_message}" banner on failure.
+- ✅ **Backend test fixes**: the upload-response shape change
+  (`tables: []` immediately, populated only after the background task
+  runs) broke every test file whose local upload-setup helper read
+  `upload_resp.json()["tables"][0]["id"]` straight off the POST
+  response — 17 files beyond `test_datasets.py` itself, found via a
+  full-codebase grep rather than discovered reactively one failure at a
+  time. Each helper was fixed to the same pattern: after the POST,
+  fetch `dataset_id`, `GET /api/v1/datasets/{dataset_id}`, assert the
+  latest version's `status == "ready"`, then read the table id from
+  there — preserving each helper's exact existing name/signature/return
+  type so no calling test needed to change. `test_field_mapping.py`
+  needed individual inspection rather than a blanket fix: one of its
+  three matches was a cleaning-operation (`/deduplicate`) response, not
+  an upload, and stayed untouched since cleaning operations are still
+  synchronous.
+- ✅ Automated backend tests: 351/351 passing, 8 skipped (2 new, in
+  `test_datasets.py`: upload returns `processing` immediately then
+  becomes `ready`, and an unparseable upload ends up `failed` with
+  `error_message` set and `tables: []`).
+- ✅ Frontend: 62/62 passing unchanged; `npx tsc --noEmit` and `npm run
+  build` both clean with the `DatasetCard` polling UI and the
+  `DatasetVersion` interface's two new fields.
+- ✅ **Verified live against the real running server, not just the test
+  suite**: registered a real user via the API, uploaded a real
+  90,000-row/4.3MB CSV and confirmed in the browser it rendered fully
+  profiled (90,000 rows, 6 columns, correct per-column stats) with no
+  processing or error banner left behind. Separately uploaded a
+  deliberately malformed file (three bare newlines) and confirmed the
+  real red "Could not process this upload: Could not parse CSV file:
+  empty CSV" banner renders in the browser, sourced from the real
+  `error_message` the background task wrote. One honest limitation:
+  the transient "Processing…" state itself was not caught on screen —
+  on this hardware even a 90,000-row file finishes well under a second,
+  faster than a manual browser reload can race it. The processing →
+  ready/failed state transition itself is proven for real (by direct,
+  immediate API polling showing `"processing"` in the raw POST response
+  body and `"ready"`/`"failed"` moments later from the real database),
+  and the banner's conditional rendering logic was verified by its two
+  stable end-states actually appearing correctly in the browser — only
+  the specific mid-transition screenshot wasn't achieved.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -3304,20 +3398,21 @@ what this round actually does.
   `LocalFilesystemStorage` has been verified against something fully
   real (production-grade, not local), repeatedly, including through the
   browser.
-- **Upload processing is synchronous (inside the request), not a
-  background job** — a deliberate Phase 2 scope cut, not an oversight:
-  a real async pipeline needs a worker process, a job-status API, and a
-  way for the frontend to poll or subscribe, each a feature of its own.
-  `redis_url` exists in `app/core/config.py` for when this is built, but
-  — same as the rate limiter found (see "Post-Phase-7: auth endpoint
-  rate limiting" above) — nothing in this codebase connects to a real
-  Redis instance yet. Fine for realistic business spreadsheets; would
-  matter for very large or very numerous concurrent uploads. See also
-  docs/ARCHITECTURE.md and docs/DEPLOYMENT.md.
+- ~~Upload processing is synchronous (inside the request), not a
+  background job~~ — done (lightweight scope: a FastAPI
+  `BackgroundTasks` callback in the existing API process, not a
+  separate worker/job queue), see "Post-Phase-7: async upload
+  processing (background task)" above. `redis_url` in
+  `app/core/config.py` remains unused — still true that nothing in this
+  codebase connects to a real Redis instance; a heavier job-queue
+  option was deliberately not taken. See also docs/ARCHITECTURE.md and
+  docs/DEPLOYMENT.md.
 - **Profiling reads a bounded sample** (`MAX_PROFILED_ROWS` = 200,000) of
-  very large files rather than the whole thing, to keep synchronous
-  request processing bounded (see the synchronous-upload limitation
-  just above). Not an issue for realistic business spreadsheets; would
+  very large files rather than the whole thing, to keep the background
+  processing task itself bounded (see "Post-Phase-7: async upload
+  processing (background task)" above — this no longer blocks the
+  request, but an unbounded per-file cost is still worth avoiding). Not
+  an issue for realistic business spreadsheets; would
   matter for a multi-million-row CSV.
 - **Mixed numeric formats** (e.g. a column mixing `"1,200"` and `"1200.5"`
   and `"N/A"`) are detected via a single regex, not a full parser — edge

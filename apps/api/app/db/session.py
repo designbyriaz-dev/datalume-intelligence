@@ -16,3 +16,17 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """For code that needs to open its own session outside the
+    request/response cycle — a FastAPI BackgroundTasks callback, whose
+    request-scoped `db` (from get_db above) is already closed by the
+    time it runs. A plain module-level import of AsyncSessionLocal
+    would work in production but silently break under the test suite,
+    which overrides get_db with a session bound to a different
+    (in-memory, per-test) engine — going through this dependency
+    instead lets tests override it the same way, so a background task's
+    writes land in the same database the test actually asserts
+    against."""
+    return AsyncSessionLocal

@@ -26,7 +26,12 @@ async def _upload(client: AsyncClient, token: str, workspace_id: str, content: b
     resp = await client.post(
         f"/api/v1/workspaces/{workspace_id}/datasets", data={"name": "Data"}, files=files, headers=_auth(token)
     )
-    return resp.json()["tables"][0]["id"]
+    assert resp.status_code == 201, resp.text
+    dataset_id = resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version["tables"][0]["id"]
 
 
 # Lease ends at +1 day and +3 months from "today" (whatever day the suite

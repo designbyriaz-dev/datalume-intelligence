@@ -69,11 +69,17 @@
   (boto3) backend that activates once `S3_ACCESS_KEY` is set. Unlike the
   database, the S3 path hasn't actually been run against a real bucket
   yet — see docs/CHECKLIST.md.
-- Upload processing is synchronous (inside the request). That's a
-  deliberate scope cut, not an oversight: a real async pipeline needs a
-  worker process, a job-status API, and a way for the frontend to poll or
-  subscribe — each a feature of its own. Redis is provisioned in
-  docker-compose for when that's built.
+- Upload processing runs in a FastAPI `BackgroundTasks` callback, not
+  inside the request: the upload response returns as soon as the file
+  is validated and stored, and parsing/profiling happen afterward in
+  the same process. A deliberate lightweight choice over a real job
+  queue — no separate worker process, no job-status API beyond the
+  existing `DatasetVersion.status` field, and the frontend polls that
+  same dataset-detail endpoint it already had. Redis is still
+  provisioned in docker-compose but unused; a heavier queue (Celery/RQ)
+  would be the next step if a single-process background task stops
+  being enough. See docs/CHECKLIST.md's "Post-Phase-7: async upload
+  processing (background task)" section.
 
 ## Phase 4 additions: billing and entitlements
 

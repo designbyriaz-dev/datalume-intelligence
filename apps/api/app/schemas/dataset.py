@@ -55,11 +55,13 @@ class DatasetVersionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    dataset_id: str
     version_number: int
     status: str
     source_filename: str | None
     file_size_bytes: int | None
     derived_from_version_id: str | None
+    error_message: str | None
     tables: list[DatasetTableOut]
 
 
