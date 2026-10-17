@@ -522,7 +522,7 @@ async def generate_executive_intelligence_report(
 
     llm_response = await llm_client.complete(
         system=EXECUTIVE_SUMMARY_SYSTEM_PROMPT,
-        messages=build_executive_summary_messages(kpi_results, pack.name),
+        messages=build_executive_summary_messages(kpi_results, pack),
         tools=[],
     )
     narrative = llm_response.text or "The AI summary was empty — see the Key metrics table below."

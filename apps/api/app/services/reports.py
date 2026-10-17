@@ -23,6 +23,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from app.core.industry_packs import IndustryPack
 from app.models.dataset import DatasetTable
 from app.services.analytics import AnalyticsError, _parse_date_cell, group_aggregate, time_trend
 from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, _VACANT_MARKERS, _add_months, KPIResult
@@ -888,15 +889,27 @@ EXECUTIVE_SUMMARY_SYSTEM_PROMPT = (
 )
 
 
-def _kpi_results_as_text(kpi_results: list[KPIResult]) -> str:
+def _kpi_results_as_text(kpi_results: list[KPIResult], pack: IndustryPack) -> str:
+    # Each KPI's own description, not just its name and a signed number
+    # — KPIResult itself carries no description (every other consumer
+    # gets that from the IndustryPack.kpis list instead). Without it, a
+    # model has nothing to disambiguate a metric whose sign isn't
+    # self-evident from the name alone (e.g. "Pupil Premium Attendance
+    # Gap" doesn't say which sign means better) — the exact gap found
+    # and fixed for the AI analyst's own KPI tool in
+    # app/services/ai/planner.py; this is the same fix for the
+    # executive summary's separate prompt-building path.
+    descriptions = {k.kpi_id: k.description for k in pack.kpis}
     lines = []
     for kpi in kpi_results:
         value = kpi.formatted if kpi.error is None else f"not available ({kpi.error})"
-        lines.append(f"- {kpi.name}: {value}")
+        description = descriptions.get(kpi.kpi_id)
+        suffix = f" ({description})" if description else ""
+        lines.append(f"- {kpi.name}{suffix}: {value}")
     return "\n".join(lines)
 
 
-def build_executive_summary_messages(kpi_results: list[KPIResult], industry_name: str) -> list[dict]:
+def build_executive_summary_messages(kpi_results: list[KPIResult], pack: IndustryPack) -> list[dict]:
     """Pure and synchronous on purpose — the actual (async) LLM call this
     feeds into lives in the router, so the prompt construction itself can
     be unit-tested without a real or fake LLMClient."""
@@ -904,7 +917,7 @@ def build_executive_summary_messages(kpi_results: list[KPIResult], industry_name
         {
             "role": "user",
             "content": (
-                f"Industry: {industry_name}\n\nComputed KPIs:\n{_kpi_results_as_text(kpi_results)}\n\n"
+                f"Industry: {pack.name}\n\nComputed KPIs:\n{_kpi_results_as_text(kpi_results, pack)}\n\n"
                 "Write the executive summary."
             ),
         }

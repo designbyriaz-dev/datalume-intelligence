@@ -1,8 +1,11 @@
 from httpx import AsyncClient
 
 from app.api.deps import get_llm_client_dep
+from app.core.industry_packs import COMMERCIAL_PROPERTY
 from app.main import app
 from app.services.ai.llm_client import LLMClient, LLMResponse
+from app.services.industry_kpis import KPIResult
+from app.services.reports import build_executive_summary_messages
 
 
 async def _register_and_login(client: AsyncClient, email: str) -> str:
@@ -223,3 +226,37 @@ async def test_outsider_cannot_generate_executive_intelligence_report(client: As
         f"/api/v1/dataset-tables/{table_id}/reports/executive-intelligence", headers=_auth(outsider_token)
     )
     assert resp.status_code == 403
+
+
+def test_executive_summary_prompt_includes_each_kpis_description() -> None:
+    """build_executive_summary_messages's own docstring says it's "pure
+    and synchronous on purpose... so the prompt construction itself can
+    be unit-tested" — this is that test, previously missing. Proves a
+    real gap is fixed: the model used to see only a KPI's name and a
+    signed number, with no definition to disambiguate a metric whose
+    sign isn't self-evident — the same gap found and fixed for the AI
+    analyst's compute_industry_kpis tool (app/services/ai/planner.py)
+    after a real model got one backwards; this is the executive
+    summary's separate prompt-building path getting the same fix."""
+    kpi_results = [
+        KPIResult("total_rent_roll", "Total Rent Roll", "currency_gbp", 6750.0, "£6,750.00"),
+        KPIResult("occupancy_rate", "Occupancy Rate", "percentage", 80.0, "80.0%"),
+    ]
+
+    messages = build_executive_summary_messages(kpi_results, COMMERCIAL_PROPERTY)
+
+    content = messages[0]["content"]
+    assert "Industry: Commercial Property Intelligence" in content
+    assert "Total Rent Roll (Sum of rent across all units): £6,750.00" in content
+    assert "Occupancy Rate (Share of units marked occupied): 80.0%" in content
+
+
+def test_executive_summary_prompt_handles_a_kpi_with_no_matching_description() -> None:
+    """Defensive: a kpi_id not found in the pack's own definitions (e.g.
+    stale data from a renamed KPI) must not crash prompt building — it
+    just omits the parenthetical rather than raising."""
+    kpi_results = [KPIResult("not_a_real_kpi_id", "Mystery Metric", "number", 1.0, "1.00")]
+
+    messages = build_executive_summary_messages(kpi_results, COMMERCIAL_PROPERTY)
+
+    assert "Mystery Metric: 1.00" in messages[0]["content"]

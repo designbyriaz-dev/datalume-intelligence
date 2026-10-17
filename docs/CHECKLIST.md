@@ -3988,6 +3988,37 @@ self-contained fix.
   answered with the exact correct figure (a 3.7% gap) — a direct
   before/after fix of the specific wrong answer this round exists to
   correct, not a new scenario invented to look good.
+- 🐛 **A proactive follow-up check found the identical gap in a second,
+  separate code path**: the Executive Intelligence Report's AI-written
+  summary (`app/services/reports.py`'s `_kpi_results_as_text`, feeding
+  `EXECUTIVE_SUMMARY_SYSTEM_PROMPT` — a one-shot prompt, not the
+  tool-calling loop above) also only ever gave the model a KPI's name
+  and signed number, never its description — the exact same root cause,
+  independently present in a completely different function that doesn't
+  share code with the planner. Fixed the same way: `_kpi_results_as_text`
+  and `build_executive_summary_messages` now take the full `IndustryPack`
+  (not just its `.name` string) and append each KPI's description
+  parenthetically. Also closed a real gap in the process: this function's
+  own docstring had claimed since it was first written that it was "pure
+  and synchronous on purpose... so the prompt construction itself can be
+  unit-tested without a real or fake LLMClient" — true, but no such unit
+  test had ever actually been written; `tests/test_reports.py` gained
+  two (the description now appears in the real prompt text; a KPI whose
+  `kpi_id` doesn't match any of the pack's own definitions degrades
+  gracefully instead of crashing prompt construction).
+- ✅ Automated backend tests: 395/395 passing (2 more, in
+  `tests/test_reports.py`, on top of the 393 from the tool-calling fix
+  above).
+- ✅ **Verified live against the real Anthropic API a second time**,
+  specifically to prove the fix changes real model output, not just
+  prompt text: generated a real Executive Intelligence Report PDF for
+  the same education workspace/dataset, downloaded and read it, and
+  confirmed the AI-generated summary now reads "Pupil Premium students
+  are actually outperforming their peers in attendance by 3.7
+  percentage points — a reversal of the disadvantage gap typically
+  observed nationally" — the correct direction, in an independent real
+  LLM call through a completely different code path than the one
+  verified above.
 
 ## Known limitations in what's built
 
