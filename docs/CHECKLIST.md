@@ -2646,10 +2646,48 @@ items that didn't need a real external account/credentials to act on
   moto — and confirms it genuinely succeeds against real MinIO. The
   claim was true, but now it's verified rather than assumed.
 - ✅ Automated backend tests: 327/327 passing (8 new).
-- ⬜ Still open: a real AWS S3 or Cloudflare R2 bucket has never
-  received a request from this code. MinIO's leniency being confirmed
-  is a reason for *more* caution before trusting this against real AWS
-  (the strict one), not less.
+- ✅ **Addendum — real Cloudflare R2 bucket, not just MinIO**: closes
+  the "still open" gap directly below, now that the user signed into
+  their own real Cloudflare account and asked for the rest to be
+  completed. Provisioned for real, via that live account (not
+  simulated): R2 enabled on the account (a real recurring-subscription
+  confirmation screen was involved — paused and got the user's explicit
+  "Yes, go ahead" before clicking it, quoting the exact billing terms
+  first, per this app's standing rule on purchase/subscription
+  actions), a real bucket (`datalume-uploads`, Automatic/Western Europe
+  location, private by default), and a real Account API Token scoped to
+  least privilege on purpose — "Object Read & Write" (not "Admin Read &
+  Write") and "Apply to specific buckets only" naming just that one
+  bucket, matching the access shape a production deployment should
+  actually use rather than a broader admin credential.
+  `apps/api/.env` now holds the real `S3_ENDPOINT_URL` / `S3_BUCKET` /
+  `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_REGION=auto` (R2's own
+  region convention, not a real AWS region) for local dev — not
+  committed, same as every other credential already in that file.
+- ✅ **`tests/test_s3_storage_r2.py`** (new): mirrors the MinIO suite's
+  write/read/delete/overwrite/missing-key/binary-exact-round-trip
+  cases, run for real against the live `datalume-uploads` bucket. Does
+  *not* repeat the bucket-auto-creation cases — the real R2 token is
+  deliberately scoped to object-level access on one pre-existing
+  bucket, so it cannot create or delete buckets, and that's exactly the
+  credential shape a real deployment should hand this code anyway.
+  Every test writes under a fresh `_r2_verification/<uuid>/...` key and
+  deletes it in a `finally` block, so running this against the real
+  production bucket leaves nothing behind. Skips the whole module
+  (never fails CI) unless real credentials are supplied via
+  `R2_TEST_ENDPOINT`/`R2_TEST_ACCESS_KEY`/`R2_TEST_SECRET_KEY` env vars
+  — unlike MinIO's public `minioadmin`/`minioadmin` default, these are
+  real secrets tied to a real account, so no default is hardcoded.
+  Run for real: **5 passed** against the live bucket (confirmed via
+  `head_bucket` finding the existing bucket without attempting
+  `create_bucket` — the token would have no permission for that — plus
+  genuine write/read/delete/overwrite round trips and a real
+  missing-key `StorageError`).
+- ✅ Now fully closed: a real AWS S3 or Cloudflare R2 bucket has
+  received real requests from this code, end to end, and the
+  "MinIO is lenient, AWS/R2 might not be" caution that motivated this
+  item is resolved — R2 accepted the exact same `S3Storage` code path
+  MinIO did, no fixes needed.
 
 ## Post-Phase-7: AI analyst conversation history UI
 
@@ -4108,9 +4146,10 @@ self-contained fix.
    the brief named is now built (11 via `_apply_table_transformation`).
 5. ~~Verify `S3Storage` against a real MinIO server~~ — done (a real
    local MinIO instance via Homebrew, not Docker — see "Post-Phase-7:
-   S3Storage verified against real MinIO" above). Still open: a real
-   AWS S3 / R2 bucket — no real bucket of any kind has received a
-   request yet.
+   S3Storage verified against real MinIO" above). ~~Still open: a real
+   AWS S3 / R2 bucket~~ — now done too, against a real Cloudflare R2
+   bucket on the user's own account, see that section's "Addendum —
+   real Cloudflare R2 bucket" above.
 6. ~~Fix the conversation-history replay simplification~~ — done, see
    "Post-Phase-7: conversation history replay fidelity" above.
 7. ~~A distributed lock for the scheduled-report scheduler~~ — done,
