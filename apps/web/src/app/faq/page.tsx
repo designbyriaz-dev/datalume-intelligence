@@ -15,7 +15,7 @@ export default function FaqPage() {
       a: "No. Cleaning, KPIs, and reports are all point-and-click, and the AI analyst answers questions typed in plain English.",
     },
     {
-      q: "What if my industry isn't Commercial Property, Residential, Social Housing, or Business Finance?",
+      q: "What if my industry isn't Commercial Property, Residential, Social Housing, Business Finance, or Public Sector?",
       a: (
         <>
           Pick &ldquo;Something else&rdquo; when you create a workspace. You still get full data

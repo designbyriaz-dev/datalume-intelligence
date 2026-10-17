@@ -75,6 +75,22 @@ const PACKS: Pack[] = [
     ],
     reports: ["Business Performance Report"],
   },
+  {
+    name: "Public Sector Budget",
+    summary: "UK local authority revenue budget monitoring — budget vs. actual spend vs. forecast outturn by service area.",
+    kpis: [
+      "Total budget, actual spend & forecast outturn",
+      "Overall variance (£ and %)",
+      "Budget utilisation rate",
+      "Over-budget line count & top 5 overspend concentration",
+    ],
+    questions: [
+      "Which service areas are forecast to overspend this year?",
+      "What's our total budget variance and is it improving or worsening?",
+      "What's our current budget utilisation rate?",
+    ],
+    reports: [],
+  },
 ];
 
 export default function SolutionsPage() {
@@ -85,7 +101,7 @@ export default function SolutionsPage() {
       <section className="mx-auto max-w-4xl px-6 py-20 text-center">
         <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">Built for how your industry works</h1>
         <p className="mt-4 text-lg text-slate-600 dark:text-slate-400">
-          Four industries get a dedicated KPI engine, automatic field mapping, and purpose-built
+          Five industries get a dedicated KPI engine, automatic field mapping, and purpose-built
           reports out of the box. Every other industry still gets full data profiling and all seven
           analytics tools — just not a fixed KPI set invented for a domain DataLume doesn't model yet.
         </p>
@@ -131,9 +147,9 @@ export default function SolutionsPage() {
       <section className="mx-auto max-w-3xl px-6 pb-20 text-center">
         <h2 className="text-xl font-semibold">Not one of these?</h2>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
-          General data analysis, public sector, education, operations &amp; logistics, or anything
-          else — pick &ldquo;Something else&rdquo; when you create a workspace. You'll get the same
-          upload, cleaning, AI analyst, and dashboard tools, without a dedicated KPI pack.
+          General data analysis, education, operations &amp; logistics, or anything else — pick
+          &ldquo;Something else&rdquo; when you create a workspace. You'll get the same upload,
+          cleaning, AI analyst, and dashboard tools, without a dedicated KPI pack.
         </p>
         <div className="mt-8 flex items-center justify-center gap-4">
           <Link

@@ -247,6 +247,71 @@ def _calc_average_monthly_revenue(df, mapping, **_kwargs) -> float:
     return round(sum(monthly.values()) / len(monthly), 2)
 
 
+def _resolve_paired_numeric(df: pl.DataFrame, mapping: dict[str, str | None], field_a: str, field_b: str) -> pl.DataFrame:
+    col_a = mapping.get(field_a)
+    col_b = mapping.get(field_b)
+    if col_a is None or col_b is None:
+        raise KPIError(f"Required fields '{field_a}' and '{field_b}' must both be mapped.")
+    return df.select([col_a, col_b]).drop_nulls()
+
+
+def _calc_total_budget(df, mapping, **_kwargs) -> float:
+    return round(float(_resolve_numeric_series(df, mapping, "annual_budget").sum()), 2)
+
+
+def _calc_total_actual_spend(df, mapping, **_kwargs) -> float:
+    return round(float(_resolve_numeric_series(df, mapping, "actual_spend").sum()), 2)
+
+
+def _calc_total_forecast_outturn(df, mapping, **_kwargs) -> float:
+    return round(float(_resolve_numeric_series(df, mapping, "forecast_outturn").sum()), 2)
+
+
+def _calc_overall_variance_amount(df, mapping, **_kwargs) -> float:
+    budget = float(_resolve_numeric_series(df, mapping, "annual_budget").sum())
+    outturn = float(_resolve_numeric_series(df, mapping, "forecast_outturn").sum())
+    return round(outturn - budget, 2)
+
+
+def _calc_overall_variance_pct(df, mapping, **_kwargs) -> float:
+    budget = float(_resolve_numeric_series(df, mapping, "annual_budget").sum())
+    if budget <= 0:
+        raise KPIError("Total budget is zero — cannot compute variance percentage.")
+    outturn = float(_resolve_numeric_series(df, mapping, "forecast_outturn").sum())
+    return round((outturn - budget) / budget * 100, 2)
+
+
+def _calc_budget_utilisation_rate(df, mapping, **_kwargs) -> float:
+    budget = float(_resolve_numeric_series(df, mapping, "annual_budget").sum())
+    if budget <= 0:
+        raise KPIError("Total budget is zero — cannot compute utilisation rate.")
+    actual = float(_resolve_numeric_series(df, mapping, "actual_spend").sum())
+    return round(actual / budget * 100, 2)
+
+
+def _calc_over_budget_line_count(df, mapping, **_kwargs) -> int:
+    sub = _resolve_paired_numeric(df, mapping, "annual_budget", "forecast_outturn")
+    budget_col = mapping["annual_budget"]
+    outturn_col = mapping["forecast_outturn"]
+    return int((sub[outturn_col] > sub[budget_col]).sum())
+
+
+def _calc_top5_overspend_concentration(df, mapping, **_kwargs) -> float:
+    service_col = mapping.get("service_area")
+    budget_col = mapping.get("annual_budget")
+    outturn_col = mapping.get("forecast_outturn")
+    if service_col is None or budget_col is None or outturn_col is None:
+        raise KPIError("Required fields 'service_area', 'annual_budget' and 'forecast_outturn' must all be mapped.")
+    sub = df.select([service_col, budget_col, outturn_col]).drop_nulls()
+    grouped = sub.group_by(service_col).agg((pl.col(outturn_col).sum() - pl.col(budget_col).sum()).alias("variance"))
+    overspends = sorted((v for v in grouped["variance"].to_list() if v > 0), reverse=True)
+    total_overspend = sum(overspends)
+    if total_overspend <= 0:
+        raise KPIError("No service areas are forecast to overspend.")
+    top5_overspend = sum(overspends[:5])
+    return round(top5_overspend / total_overspend * 100, 2)
+
+
 _CALCULATORS = {
     "total_rent_roll": _calc_total_rent_roll,
     "average_rent": _calc_average_rent,
@@ -268,6 +333,14 @@ _CALCULATORS = {
     "net_profit": _calc_net_profit,
     "profit_margin_pct": _calc_profit_margin_pct,
     "average_monthly_revenue": _calc_average_monthly_revenue,
+    "total_budget": _calc_total_budget,
+    "total_actual_spend": _calc_total_actual_spend,
+    "total_forecast_outturn": _calc_total_forecast_outturn,
+    "overall_variance_amount": _calc_overall_variance_amount,
+    "overall_variance_pct": _calc_overall_variance_pct,
+    "budget_utilisation_rate": _calc_budget_utilisation_rate,
+    "over_budget_line_count": _calc_over_budget_line_count,
+    "top5_overspend_concentration": _calc_top5_overspend_concentration,
 }
 
 

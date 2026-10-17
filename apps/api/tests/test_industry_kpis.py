@@ -2,7 +2,7 @@ import datetime as dt
 
 import polars as pl
 
-from app.core.industry_packs import BUSINESS_FINANCE, COMMERCIAL_PROPERTY, SOCIAL_HOUSING
+from app.core.industry_packs import BUSINESS_FINANCE, COMMERCIAL_PROPERTY, PUBLIC_SECTOR, SOCIAL_HOUSING
 from app.services.industry_kpis import compute_kpis
 from app.services.industry_matching import missing_required_fields, resolve_field_mapping
 
@@ -102,6 +102,95 @@ def test_business_finance_kpis_are_numerically_correct():
     assert round(results["profit_margin_pct"].value, 1) == 47.1
     # 3 distinct months: Jan=10000, Feb=12000, Mar=12000 -> avg 11333.33
     assert round(results["average_monthly_revenue"].value, 2) == 11333.33
+
+
+def test_public_sector_field_mapping_resolves_messy_headers():
+    df = pl.DataFrame(
+        {
+            "Directorate": ["Adult Social Care"],
+            "Budget Head": ["Staffing"],
+            "Approved Budget": [1000000],
+            "YTD Actual": [650000],
+            "Projected Outturn": [1100000],
+        }
+    )
+    mapping = resolve_field_mapping(PUBLIC_SECTOR, df.columns)
+    assert mapping["service_area"] == "Directorate"
+    assert mapping["budget_line"] == "Budget Head"
+    assert mapping["annual_budget"] == "Approved Budget"
+    assert mapping["actual_spend"] == "YTD Actual"
+    assert mapping["forecast_outturn"] == "Projected Outturn"
+    assert missing_required_fields(PUBLIC_SECTOR, mapping) == []
+
+
+def test_public_sector_kpis_are_numerically_correct():
+    # 7 service areas, 6 forecast to overspend by varying amounts and one
+    # (G) forecast to underspend — chosen specifically so "top 5
+    # overspend concentration" has to actually exclude the smallest
+    # overspender (F, +5) rather than trivially summing everyone.
+    df = pl.DataFrame(
+        {
+            "Service Area": ["A", "B", "C", "D", "E", "F", "G"],
+            "Budget Line": [f"Line {i}" for i in range(7)],
+            "Annual Budget": [100, 100, 100, 100, 100, 100, 100],
+            "Actual Spend": [90, 80, 70, 60, 50, 55, 80],
+            "Forecast Outturn": [150, 140, 130, 120, 110, 105, 90],
+        }
+    )
+    mapping = resolve_field_mapping(PUBLIC_SECTOR, df.columns)
+    assert missing_required_fields(PUBLIC_SECTOR, mapping) == []
+
+    results = {r.kpi_id: r for r in compute_kpis(df, PUBLIC_SECTOR, mapping)}
+
+    assert results["total_budget"].value == 700.0
+    assert results["total_actual_spend"].value == 485.0
+    assert results["total_forecast_outturn"].value == 845.0
+    assert results["overall_variance_amount"].value == 145.0
+    assert round(results["overall_variance_pct"].value, 2) == 20.71
+    assert round(results["budget_utilisation_rate"].value, 2) == 69.29
+    # A-F all forecast to overspend (150>100, ..., 105>100); only G
+    # (90<100) doesn't.
+    assert results["over_budget_line_count"].value == 6
+    # Overspends by service area: A=50, B=40, C=30, D=20, E=10, F=5.
+    # Top 5 (A-E) = 150 of a total overspend of 155 -> 96.77%.
+    assert round(results["top5_overspend_concentration"].value, 2) == 96.77
+    assert all(r.error is None for r in results.values())
+
+    assert PUBLIC_SECTOR.compliance_caveat is not None
+    assert "indicative only" in PUBLIC_SECTOR.compliance_caveat
+
+
+def test_public_sector_kpi_reports_error_for_unmapped_field():
+    df = pl.DataFrame({"Service Area": ["A", "B"], "Annual Budget": [100, 200]})
+    mapping = resolve_field_mapping(PUBLIC_SECTOR, df.columns)
+    assert missing_required_fields(PUBLIC_SECTOR, mapping) != []
+
+    results = {r.kpi_id: r for r in compute_kpis(df, PUBLIC_SECTOR, mapping)}
+    assert results["total_forecast_outturn"].error is not None
+    assert "forecast_outturn" in results["total_forecast_outturn"].error
+    # total_budget's only required field (annual_budget) WAS mapped, so
+    # it should still compute even though other fields are missing.
+    assert results["total_budget"].value == 300.0
+
+
+def test_public_sector_variance_kpis_handle_no_overspending_areas():
+    """Everyone's under budget — top5_overspend_concentration should
+    error clearly rather than divide by zero or silently return 0."""
+    df = pl.DataFrame(
+        {
+            "Service Area": ["A", "B"],
+            "Budget Line": ["Line 1", "Line 2"],
+            "Annual Budget": [100, 100],
+            "Actual Spend": [50, 60],
+            "Forecast Outturn": [90, 95],
+        }
+    )
+    mapping = resolve_field_mapping(PUBLIC_SECTOR, df.columns)
+    results = {r.kpi_id: r for r in compute_kpis(df, PUBLIC_SECTOR, mapping)}
+
+    assert results["over_budget_line_count"].value == 0
+    assert results["top5_overspend_concentration"].error is not None
+    assert "overspend" in results["top5_overspend_concentration"].error.lower()
 
 
 def test_matching_does_not_false_positive_on_unrelated_words():

@@ -7,6 +7,7 @@ const SOLUTIONS = [
   { name: "Residential & Lettings", blurb: "Arrears, void periods and portfolio profitability." },
   { name: "Social Housing", blurb: "Stock condition, compliance exceptions and investment planning." },
   { name: "Business & Finance", blurb: "Revenue, expenses and profitability trends, explained plainly." },
+  { name: "Public Sector Budgets", blurb: "Budget vs. actual spend, forecast outturn and variance by service area." },
 ];
 
 export default function HomePage() {

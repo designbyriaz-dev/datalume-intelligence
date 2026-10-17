@@ -49,7 +49,13 @@ async def test_list_industry_packs(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/industry-packs", headers=_auth(token))
     assert resp.status_code == 200
     ids = {p["industry_id"] for p in resp.json()}
-    assert ids == {"commercial_property", "residential_property", "social_housing", "business_finance"}
+    assert ids == {
+        "commercial_property",
+        "residential_property",
+        "social_housing",
+        "business_finance",
+        "public_sector",
+    }
 
     commercial = next(p for p in resp.json() if p["industry_id"] == "commercial_property")
     assert len(commercial["kpis"]) == 8

@@ -25,7 +25,13 @@ import {
   WEBHOOK_EVENT_TYPES,
 } from "@/lib/api";
 
-const INDUSTRY_PACK_IDS = new Set(["commercial_property", "residential_property", "social_housing", "business_finance"]);
+const INDUSTRY_PACK_IDS = new Set([
+  "commercial_property",
+  "residential_property",
+  "social_housing",
+  "business_finance",
+  "public_sector",
+]);
 
 // Industries whose KPIs/reports actually use the configurable date window
 // (leases expiring, overdue inspection, tenancies ending) — business_finance

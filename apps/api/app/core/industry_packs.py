@@ -6,10 +6,14 @@ app/services/tools.py).
 
 Scope: the four packs named in the brief's Phase 5 deliverable list —
 commercial property, residential property, business finance, and social
-housing (section 9 also describes public sector and education/health
-packs, but those weren't in the Phase 5 "Create" list, so they're not
-built here; public sector in particular would need real domain input
-before the KPI definitions below could be written honestly).
+housing — plus a fifth, public_sector, added in a later Post-Phase-7
+round once the user supplied the real domain input this module
+previously said it was waiting on (see docs/CHECKLIST.md's
+"Post-Phase-7: public sector industry pack" section): UK local
+authority revenue budget monitoring specifically (service area, annual
+budget vs. actual spend vs. forecast outturn), not public sector in
+general. Education/health (also named in the brief's section 9) is
+still not built.
 
 KPI counts here are a representative subset of each pack's brief
 section, not an exhaustive implementation of every metric mentioned —
@@ -318,9 +322,116 @@ BUSINESS_FINANCE = IndustryPack(
     report_templates=("business_performance",),
 )
 
+PUBLIC_SECTOR = IndustryPack(
+    industry_id="public_sector",
+    name="Public Sector Budget Intelligence",
+    column_aliases=(
+        ColumnAlias(
+            "service_area",
+            "Service area / directorate / department responsible for this budget line",
+            ("service area", "directorate", "department", "cost centre", "service"),
+            True,
+        ),
+        ColumnAlias(
+            "budget_line",
+            "Budget line / budget head description",
+            ("budget line", "budget head", "line description", "budget item"),
+            True,
+        ),
+        ColumnAlias(
+            "annual_budget",
+            "Approved annual budget for this line",
+            ("annual budget", "budget", "budget amount", "approved budget", "budget (£)"),
+            True,
+        ),
+        ColumnAlias(
+            "actual_spend",
+            "Actual spend to date against this line",
+            ("actual spend", "actual to date", "ytd actual", "spend to date", "actual"),
+            True,
+        ),
+        ColumnAlias(
+            "forecast_outturn",
+            "Forecast full-year spend (projected outturn)",
+            ("forecast outturn", "projected outturn", "full year forecast", "outturn", "forecast"),
+            False,
+        ),
+        ColumnAlias("budget_year", "Financial/budget year this line belongs to", ("budget year", "financial year", "fy"), False),
+    ),
+    kpis=(
+        KPIDefinition("total_budget", "Total Budget", "Sum of approved annual budget across all lines", "currency_gbp", ("annual_budget",)),
+        KPIDefinition(
+            "total_actual_spend", "Total Actual Spend", "Sum of actual spend to date", "currency_gbp", ("actual_spend",)
+        ),
+        KPIDefinition(
+            "total_forecast_outturn",
+            "Total Forecast Outturn",
+            "Sum of forecast full-year spend",
+            "currency_gbp",
+            ("forecast_outturn",),
+        ),
+        KPIDefinition(
+            "overall_variance_amount",
+            "Overall Variance",
+            "Forecast outturn minus annual budget, summed across all lines — positive means forecast "
+            "overspend",
+            "currency_gbp",
+            ("annual_budget", "forecast_outturn"),
+        ),
+        KPIDefinition(
+            "overall_variance_pct",
+            "Overall Variance %",
+            "Overall variance as a percentage of total budget",
+            "percentage",
+            ("annual_budget", "forecast_outturn"),
+        ),
+        KPIDefinition(
+            "budget_utilisation_rate",
+            "Budget Utilisation Rate",
+            "Actual spend to date as a percentage of annual budget",
+            "percentage",
+            ("annual_budget", "actual_spend"),
+        ),
+        KPIDefinition(
+            "over_budget_line_count",
+            "Over-Budget Line Count",
+            "Count of budget lines whose forecast outturn exceeds their annual budget",
+            "count",
+            ("annual_budget", "forecast_outturn"),
+        ),
+        KPIDefinition(
+            "top5_overspend_concentration",
+            "Top 5 Overspend Concentration",
+            "Share of total forecast overspend coming from the 5 service areas overspending the most",
+            "percentage",
+            ("service_area", "annual_budget", "forecast_outturn"),
+        ),
+    ),
+    suggested_questions=(
+        "Which service areas are forecast to overspend this year?",
+        "What's our total budget variance and is it improving or worsening?",
+        "What's our current budget utilisation rate?",
+        "Which budget lines are most over budget?",
+    ),
+    terminology={
+        "Variance": "The difference between budgeted and actual (or forecast) spend.",
+        "Outturn": "The final, full-year spend position — actual if the year has ended, forecast if not.",
+        "Virement": "A formal transfer of budget from one line or service area to another.",
+        "RAG Status": "Red/Amber/Green — a traffic-light indicator of budget health, often reported alongside variance.",
+        "Cost Centre": "An organisational unit (e.g. a service area or directorate) that budget is allocated to and tracked against.",
+        "Precept": "The amount a local authority (e.g. a parish or town council) adds to council tax to fund its own budget.",
+    },
+    report_templates=(),
+    compliance_caveat=(
+        "Budget monitoring figures are calculated from the data you uploaded and are indicative only — "
+        "confirm against your authority's official finance system before reporting to committee or "
+        "publishing externally."
+    ),
+)
+
 INDUSTRY_PACKS: dict[str, IndustryPack] = {
     p.industry_id: p
-    for p in (COMMERCIAL_PROPERTY, RESIDENTIAL_PROPERTY, SOCIAL_HOUSING, BUSINESS_FINANCE)
+    for p in (COMMERCIAL_PROPERTY, RESIDENTIAL_PROPERTY, SOCIAL_HOUSING, BUSINESS_FINANCE, PUBLIC_SECTOR)
 }
 
 

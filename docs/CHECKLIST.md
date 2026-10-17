@@ -374,9 +374,10 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
 Scope note: built the four packs named in the brief's own Phase 5
 "Create" list (commercial property, residential property, business
 finance, social housing). Public sector and education/health are
-described in section 9 but weren't in that list — not started, and
-public sector in particular needs real domain input before its KPIs
-could be written honestly rather than guessed.
+described in section 9 but weren't in that list — not started in this
+phase. Public sector was added later, in a Post-Phase-7 round, once
+real domain input was actually supplied (see "Post-Phase-7: public
+sector industry pack" below); education/health is still not started.
 
 - ✅ Industry pack registry (`app/core/industry_packs.py`): all four
   packs with real column-alias lists, KPI definitions, suggested AI
@@ -461,8 +462,10 @@ could be written honestly rather than guessed.
   drag-and-drop reorder, add, and remove widgets" below for the full
   Phase 6 build-out. Widget resizing and multiple saved layouts per
   table are still not built (see that section's own remaining gaps).
-- ⬜ Public sector and education/health packs — not started (see scope
-  note above).
+- ✅⚠️ Public sector pack — built (UK local authority budget monitoring
+  specifically, not public sector in general), see "Post-Phase-7:
+  public sector industry pack" below. Education/health is still not
+  started.
 - ✅ Column matching is still a heuristic (word-token overlap), not a
   certified parser — ambiguous short aliases (e.g. "status") can still
   mismatch on unusual real-world data. But a user can now review and
@@ -3651,6 +3654,111 @@ retry), and Stripe Tax for VAT.
   showing the correct customer name and email — not a mock, not a
   simulated redirect. Cleaned up the real test customer afterward.
 
+## Post-Phase-7: public sector industry pack
+
+The other option from the fork at the end of the dunning/VAT round (the
+user picked billing policy first); the last item left once that closed.
+`app/core/industry_packs.py`'s own module docstring had said since
+Phase 5 that public sector "would need real domain input before the
+KPI definitions... could be written honestly" — this round is that
+input finally being supplied, not guessed. Scoped down from "public
+sector" in general (a huge, varied space — procurement, grants, service
+performance, as well as budgets) to one concrete, well-defined use case
+the user picked explicitly: **UK local authority revenue budget
+monitoring** — budget vs. actual spend vs. forecast outturn by service
+area, the way a real council publishes these reports. A draft pack
+(columns, KPIs, suggested questions, terminology, compliance caveat)
+was shown to the user as a preview before any code was written, and
+approved as drafted — the actual confirmation step this item had been
+waiting on.
+
+- ✅ **`PUBLIC_SECTOR` industry pack** (`app/core/industry_packs.py`,
+  `industry_id="public_sector"` — already a valid `Workspace.industry`
+  value since Phase 1, just never had a pack): 6 column aliases
+  (`service_area`, `budget_line`, `annual_budget`, `actual_spend`
+  required; `forecast_outturn`, `budget_year` optional), 8 KPIs, 4
+  suggested AI questions, a 6-term glossary (variance, outturn,
+  virement, RAG status, cost centre, precept), and a compliance caveat
+  matching social_housing's "indicative only, confirm before reporting"
+  pattern. No report template yet — same as every other pack's first
+  round (business_finance and commercial_property also shipped with
+  zero or one report before a later round added more); report_templates
+  is an empty tuple, which the schema/frontend already handle as a
+  normal, non-error state.
+- ✅ **8 KPI calculators** (`app/services/industry_kpis.py`):
+  `total_budget`, `total_actual_spend`, `total_forecast_outturn`
+  (simple sums, same pattern as every other pack's totals);
+  `overall_variance_amount`/`overall_variance_pct` (forecast minus
+  budget, summed — same shape as `net_profit`/`profit_margin_pct`);
+  `budget_utilisation_rate` (actual ÷ budget, same shape as
+  `occupancy_rate`); `over_budget_line_count` (row-level comparison,
+  new pattern — no existing KPI compared two numeric columns per row
+  before this); `top5_overspend_concentration` (the most novel one —
+  variance grouped by service area, filtered to positive/overspending
+  only, then the same "top 5 share of total" shape
+  `tenant_concentration_top5` already established, adapted to a
+  *derived* per-row value instead of a raw column). All 8 registered in
+  `_CALCULATORS` — covered by the existing
+  `test_every_pack_kpi_has_a_registered_calculator` regression test
+  with zero changes needed to that test itself.
+- ✅ **Frontend**: the onboarding "What do you want to analyse?" card
+  list is already populated dynamically from the real backend registry
+  (`api.listIndustryPacks`) — the new pack's card appeared with zero
+  frontend changes for the card itself. `public_sector` removed from
+  `OTHER_INDUSTRIES`' free-form fallback dropdown (now redundant with
+  its own dedicated card).
+- 🐛 **Found and fixed a real frontend gap while verifying live**: a
+  *second*, separate hardcoded set, `INDUSTRY_PACK_IDS` in
+  `workspaces/[id]/page.tsx`, gates whether the "Compute industry
+  KPIs"/"Review field mapping" buttons and the scenario-modelling panel
+  render at all — independent of the onboarding card list, and easy to
+  miss by only checking the card appeared. Caught because the KPI
+  button was genuinely missing from a real uploaded dataset in the
+  browser, not from reading the code. Fixed by adding `"public_sector"`
+  to that set (correctly *not* added to the separate
+  `INDUSTRIES_WITH_KPI_WINDOW` set — this pack has no date-window KPI
+  like "leases expiring" or "overdue inspection", so that setting
+  would be a no-op for it, same reasoning already documented for
+  `business_finance`).
+- ✅ **Marketing pages corrected to match**, not left stale: `solutions`
+  page gained a fifth pack card and "Four industries" → "Five
+  industries"; `faq` page's "what if my industry isn't X, Y, Z"
+  question updated; the landing page's `SOLUTIONS` list gained an
+  entry; three separate "public sector" mentions in now-inaccurate
+  fallback-category copy (two on the dashboard, one on `/solutions`)
+  removed, since it's no longer a fallback category.
+- ✅ Automated backend tests: 381/381 passing (4 new, in
+  `tests/test_industry_kpis.py`): field-mapping resolution against
+  messy real-world headers, all 8 KPIs numerically hand-verified
+  against an independently computed fixture (7 service areas, 6
+  forecast to overspend by different amounts — chosen specifically so
+  `top5_overspend_concentration` has to actually exclude the smallest
+  overspender rather than trivially summing everyone), the missing-
+  field error path, and a no-overspending-areas edge case
+  (`top5_overspend_concentration` errors cleanly rather than
+  divide-by-zero). `test_industry_api.py`'s pack-count assertion
+  extended to include `public_sector`.
+- ✅ Frontend: 66/66 passing (one test's `public_sector` fixture value
+  swapped for `education`, since `public_sector` no longer lives in the
+  free-form fallback dropdown that test exercises). `npx tsc --noEmit`
+  and `npm run build` both clean.
+- ✅ **Verified live against the real running server with a real
+  uploaded dataset — numbers hand-verified independently, not just
+  "the page rendered something"**: built a real 7-line UK council
+  budget CSV (5 directorates, deliberately including both over- and
+  under-spending lines), uploaded it through the real API, and
+  confirmed every one of the 8 KPIs displayed in the browser exactly
+  matched hand-calculated values (e.g. Total Budget £3,170,000.00,
+  Overall Variance £210,000.00, Top 5 Overspend Concentration 100.0% —
+  only 3 of 5 areas were overspending, so this one is correctly
+  trivial). Then asked the real AI analyst (a real Anthropic API call)
+  the pack's own suggested question, "Which service areas are forecast
+  to overspend this year?" — it called `group_aggregate` for real and
+  answered with the exact same per-service-area variance figures (Adult
+  Social Care +£80,000, Children Services +£130,000, Highways
+  +£20,000) independently hand-computed beforehand, not copied from the
+  AI's own output.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -3771,8 +3879,10 @@ retry), and Stripe Tax for VAT.
     Planning, Executive Intelligence, etc. — the pattern is now proven
     six times; each remaining one is a template-writing task on top of
     the existing KPI engine, attached to an existing pack as a second
-    (or third) report, or to a new pack (public sector/education) once
-    that pack has real domain input to define its KPIs from.
+    (or third) report, or to a new pack — public_sector now has real
+    domain input and KPIs (see "Post-Phase-7: public sector industry
+    pack" above) but no report template yet; education still has
+    neither.
 13. ~~A schema-confirmation UI for industry field mappings~~ — done, see
     "Post-Phase-7: industry field mapping confirmation" above.
 14. ~~Set `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`/`OIDC_DISCOVERY_URL` against
