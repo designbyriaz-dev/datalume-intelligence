@@ -24,6 +24,13 @@ class UsageOut(BaseModel):
     )
 
 
+class UsageHistoryEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    period_key: str = Field(description="Calendar month this row covers, as 'YYYY-MM'.")
+    analyses_count: int
+
+
 class SubscriptionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

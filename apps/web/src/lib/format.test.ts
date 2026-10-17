@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { daysUntil, formatBytes, humanizeEventType, resetCountdownLabel } from "./format";
+import { daysUntil, formatBytes, formatPeriodKey, humanizeEventType, resetCountdownLabel } from "./format";
 
 const FIXED_NOW = new Date("2026-03-15T12:00:00.000Z");
 
@@ -87,5 +87,19 @@ describe("humanizeEventType", () => {
 
   it("leaves an event type with no separators unchanged", () => {
     expect(humanizeEventType("login")).toBe("login");
+  });
+});
+
+describe("formatPeriodKey", () => {
+  it("formats a mid-year month", () => {
+    expect(formatPeriodKey("2026-03")).toBe("March 2026");
+  });
+
+  it("formats January without an off-by-one month index error", () => {
+    expect(formatPeriodKey("2026-01")).toBe("January 2026");
+  });
+
+  it("formats December without overflowing into the next year", () => {
+    expect(formatPeriodKey("2025-12")).toBe("December 2025");
   });
 });

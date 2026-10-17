@@ -15,6 +15,7 @@ from app.schemas.billing import (
     PortalSessionRequest,
     PortalSessionResponse,
     SubscriptionOut,
+    UsageHistoryEntry,
     UsageOut,
 )
 from app.services import billing
@@ -105,6 +106,31 @@ async def get_subscription(
 ) -> SubscriptionOut:
     subscription = await _resolve_subscription_read(organization_id, current_user, db)
     return await _to_subscription_out(db, subscription)
+
+
+# The Phase 4 gap this closes ("no usage-history view, no 'usage resets
+# in N days' countdown" — the countdown was done in a Post-Phase-7
+# round, see docs/CHECKLIST.md) asked for history, not just the current
+# month /subscription already returns. 12 rows is a year — plenty for a
+# user checking "was last month unusually high", and UsageCounter rows
+# are cheap enough that no caller has ever needed more.
+USAGE_HISTORY_LIMIT = 12
+
+
+@router.get("/usage-history", response_model=list[UsageHistoryEntry])
+async def get_usage_history(
+    organization_id: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[UsageCounter]:
+    subscription = await _resolve_subscription_read(organization_id, current_user, db)
+    result = await db.execute(
+        select(UsageCounter)
+        .where(UsageCounter.subscription_id == subscription.id)
+        .order_by(UsageCounter.period_key.desc())
+        .limit(USAGE_HISTORY_LIMIT)
+    )
+    return list(result.scalars().all())
 
 
 async def _require_checkout_access(

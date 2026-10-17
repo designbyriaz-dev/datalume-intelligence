@@ -2,8 +2,11 @@ import datetime as dt
 import os
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.models.billing import UsageCounter
+from app.services.billing import current_period_key
 
 SAMPLE_CSV = b"name,value\nA,1\nB,2\nC,3\n"
 
@@ -287,3 +290,76 @@ async def test_max_upload_size_env_override_does_not_break_plan_enforcement(clie
     finally:
         del os.environ["MAX_UPLOAD_SIZE_BYTES"]
         get_settings.cache_clear()
+
+
+async def test_usage_history_is_empty_for_a_brand_new_subscription(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "ushist1@example.com")
+    resp = await client.get("/api/v1/billing/usage-history", headers=_auth(token))
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+async def test_usage_history_reflects_real_analyses(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "ushist2@example.com")
+    workspace_id = await _create_workspace(client, token)
+    upload_resp = await _upload(client, token, workspace_id, "Data")
+    table_id = await _ready_table_id(client, token, upload_resp)
+
+    for _ in range(2):
+        resp = await client.post(
+            f"/api/v1/dataset-tables/{table_id}/analyze",
+            json={"operation": "descriptive_stats", "parameters": {"column": "value"}},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 201, resp.text
+
+    history_resp = await client.get("/api/v1/billing/usage-history", headers=_auth(token))
+    assert history_resp.status_code == 200
+    history = history_resp.json()
+    assert len(history) == 1  # only the current calendar month has ever had any usage
+    assert history[0]["period_key"] == current_period_key()
+    assert history[0]["analyses_count"] == 2
+
+
+async def test_usage_history_orders_most_recent_first_and_respects_the_limit(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token = await _register_and_login(client, "ushist3@example.com")
+    sub_resp = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    subscription_id = sub_resp.json()["id"]
+
+    # 14 months of history, inserted out of order, to prove the endpoint
+    # both sorts (not just returns insertion order) and caps at
+    # USAGE_HISTORY_LIMIT (12) rather than returning everything.
+    period_keys = [f"2025-{month:02d}" for month in range(1, 13)] + ["2026-01", "2026-02"]
+    for i, period_key in enumerate(reversed(period_keys)):
+        db_session.add(UsageCounter(subscription_id=subscription_id, period_key=period_key, analyses_count=i + 1))
+    await db_session.commit()
+
+    history_resp = await client.get("/api/v1/billing/usage-history", headers=_auth(token))
+    assert history_resp.status_code == 200
+    history = history_resp.json()
+    assert len(history) == 12
+    returned_keys = [row["period_key"] for row in history]
+    assert returned_keys == sorted(returned_keys, reverse=True)  # most recent first
+    assert returned_keys[0] == "2026-02"
+    assert "2025-01" not in returned_keys  # the two oldest months fell outside the 12-row limit
+    assert "2025-02" not in returned_keys
+
+
+async def test_outsider_cannot_read_org_usage_history(client: AsyncClient) -> None:
+    owner_token = await _register_and_login(client, "ushist4@example.com")
+    outsider_token = await _register_and_login(client, "ushist4outsider@example.com")
+
+    org_resp = await client.post("/api/v1/organizations", json={"name": "Gamma"}, headers=_auth(owner_token))
+    org_id = org_resp.json()["id"]
+
+    denied = await client.get(
+        f"/api/v1/billing/usage-history?organization_id={org_id}", headers=_auth(outsider_token)
+    )
+    assert denied.status_code == 403
+
+    allowed = await client.get(
+        f"/api/v1/billing/usage-history?organization_id={org_id}", headers=_auth(owner_token)
+    )
+    assert allowed.status_code == 200

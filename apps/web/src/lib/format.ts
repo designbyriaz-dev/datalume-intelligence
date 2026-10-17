@@ -25,3 +25,17 @@ export function formatBytes(bytes: number): string {
 export function humanizeEventType(eventType: string): string {
   return eventType.replace(/[._]/g, " ");
 }
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// UsageCounter.period_key is a plain "YYYY-MM" string (app/models/billing.py)
+// — parsed with Number(), not `new Date("YYYY-MM")`, since that string is
+// parsed as UTC midnight by the Date constructor and can display as the
+// previous month in a negative-UTC-offset timezone.
+export function formatPeriodKey(periodKey: string): string {
+  const [year, month] = periodKey.split("-").map(Number);
+  return `${MONTH_NAMES[month - 1]} ${year}`;
+}

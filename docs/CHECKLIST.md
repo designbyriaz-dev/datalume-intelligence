@@ -363,8 +363,8 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   over time) still isn't tracked — the dashboard shows a point-in-time
   snapshot, not a trend.
 - ✅⚠️ **"Usage resets in N days" countdown** — done, see "Post-Phase-7:
-  usage reset countdown" below. Still true: usage is tracked per
-  calendar month only, with no usage-history view and no proration
+  usage reset countdown" below. ~~No usage-history view~~ — done, see
+  "Post-Phase-7: usage history view" below. Still true: no proration
   display for mid-cycle plan changes (Stripe handles proration on its
   side once Checkout/Portal are live, but nothing surfaces that to the
   user yet).
@@ -4187,6 +4187,67 @@ domain input and KPIs but no report template are done.
   afterward: deleted the 3 real objects this run wrote to the
   production R2 bucket via a direct boto3 call.
 
+## Post-Phase-7: usage history view
+
+Closes the other half of the Phase 4 gap "Usage resets in N days"
+countdown's own section left open: "no usage-history view, no
+proration display for mid-cycle plan changes." This builds the usage
+history view. Proration display is still open — Stripe only exposes
+that through an "upcoming invoice" preview API call, a materially
+bigger piece of work than this, and nothing in the brief or prior
+session feedback has called it out as a concrete near-term need.
+
+- ✅ **`GET /api/v1/billing/usage-history`** (`app/api/v1/routers/billing.py`)
+  — returns the last 12 months of `UsageCounter` rows for the caller's
+  subscription (or an organization's, with the same manager-or-member
+  read check `_resolve_subscription_read` already enforces for
+  `/billing/subscription` — no new authorization logic needed, since
+  this is just a longer view of data that endpoint already exposes one
+  month of). Ordered most-recent-first; a free account that's never
+  run an analysis gets `[]`, not an error.
+- ✅ **`UsageHistoryEntry`** schema (`app/schemas/billing.py`) —
+  `period_key` + `analyses_count`, intentionally not the limit: a
+  plan's `max_analyses_per_month` can change over time (upgrades,
+  downgrades, pricing changes), so showing the *current* plan's limit
+  next to a *past* month's count would misrepresent what that month's
+  quota actually was.
+- ✅ **Frontend**: a new `/dashboard/usage` page — closely follows the
+  existing Activity Log page's exact shape (loading state, empty
+  state, a simple list/table, a "← Dashboard" link back), now linked
+  from the usage summary banner on the dashboard alongside
+  Organizations/API keys/Activity log/Security. `formatPeriodKey`
+  (`apps/web/src/lib/format.ts`) turns a `"YYYY-MM"` key into "March
+  2026" — parsed with `Number()` on the split string rather than `new
+  Date("YYYY-MM")`, which parses as UTC midnight and can render as the
+  *previous* month in a negative-UTC-offset timezone; a new pure,
+  unit-tested function for the same reason `formatBytes` and
+  `humanizeEventType` are.
+- ✅ Automated backend tests: 405/405 passing, 13 skipped (4 new in
+  `tests/test_billing.py`: empty history for a brand-new subscription,
+  history reflecting real `/analyze` calls end-to-end, a
+  direct-`db_session` test proving both the most-recent-first ordering
+  and the 12-row limit against 14 months of out-of-order data, and the
+  organization outsider-403/owner-200 access check).
+- ✅ Automated frontend tests: 76/76 passing (3 new, in
+  `format.test.ts`, for `formatPeriodKey` — mid-year, January, and
+  December, specifically to catch the off-by-one month-index bug a
+  naive `MONTH_NAMES[month]` instead of `MONTH_NAMES[month - 1]` would
+  have introduced).
+- ✅ Frontend typecheck: clean (`tsc --noEmit`).
+- ✅ **Verified live against two real running servers**: registered a
+  real account via `curl` against the real local API, ran 3 real
+  `/analyze` calls, confirmed `GET /billing/usage-history` returned
+  `[{"period_key": "2026-10", "analyses_count": 3}]` — then logged
+  into that same account through the real browser-rendered frontend
+  dev server and confirmed `/dashboard/usage` rendered "October 2026 —
+  3" (screenshot taken). Also confirmed the empty state renders
+  correctly for an account with no usage yet. Since
+  `apps/api/.env` now holds real Cloudflare R2 credentials (see
+  "Post-Phase-7: S3Storage verified against real MinIO"'s addendum
+  above), this ran against the real R2 bucket, not local disk —
+  cleaned up afterward by deleting the real objects this run wrote,
+  via a direct boto3 call, same as every live check since.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -4207,22 +4268,19 @@ domain input and KPIs but no report template are done.
 - ~~Organizations: no way to remove a member or change their role once
   invited, and max_team_members unenforced~~ — both done, see
   "Post-Phase-7: organization member management" below.
-- **S3Storage is tested against a mocked S3 API and a real MinIO
-  server, not a real AWS/R2 bucket**: `tests/test_s3_storage.py` runs
-  the real boto3 client code (bucket auto-creation, write, read,
-  read-of-missing-key, delete, overwrite) against moto — a fake AWS
-  backend that implements the actual S3 API semantics, not a
-  hand-rolled stub. This caught and fixed a real bug: bucket
-  auto-creation called `create_bucket` with no
-  `CreateBucketConfiguration`, which real AWS S3 rejects for any region
-  other than `us-east-1` — including `eu-west-2`, this app's own
-  default region (see `app/services/storage.py`).
-  `tests/test_s3_storage_minio.py` closed the next layer — see
-  "Post-Phase-7: S3Storage verified against real MinIO" below. What's
-  still not proven: a real AWS S3 or Cloudflare R2 bucket — only
-  `LocalFilesystemStorage` has been verified against something fully
-  real (production-grade, not local), repeatedly, including through the
-  browser.
+- ~~S3Storage is tested against a mocked S3 API and a real MinIO
+  server, not a real AWS/R2 bucket~~ — done, see "Post-Phase-7:
+  S3Storage verified against real MinIO"'s addendum above:
+  `tests/test_s3_storage_r2.py` runs the same write/read/delete/
+  overwrite/missing-key/binary-exact-round-trip suite for real against
+  a real Cloudflare R2 bucket on the account holder's own account, via
+  a real least-privilege Account API Token. `apps/api/.env` now holds
+  real R2 credentials for local dev, and every live verification since
+  (the two new report templates below) has gone through this real
+  bucket, not `LocalFilesystemStorage`. AWS S3 itself (as opposed to
+  R2, its S3-compatible cousin) remains untried — a smaller gap than
+  before, since R2 and AWS S3 share the exact same client code path and
+  API surface in `app/services/storage.py`.
 - ~~Upload processing is synchronous (inside the request), not a
   background job~~ — done (lightweight scope: a FastAPI
   `BackgroundTasks` callback in the existing API process, not a

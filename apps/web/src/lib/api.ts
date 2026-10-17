@@ -310,6 +310,11 @@ export interface Subscription {
   };
 }
 
+export interface UsageHistoryEntry {
+  period_key: string;
+  analyses_count: number;
+}
+
 export interface KPIResult {
   kpi_id: string;
   name: string;
@@ -868,6 +873,9 @@ export const api = {
   listPlans: () => request<Plan[]>("/api/v1/billing/plans", {}),
 
   getSubscription: (token: string) => request<Subscription>("/api/v1/billing/subscription", {}, token),
+
+  getUsageHistory: (token: string) =>
+    request<UsageHistoryEntry[]>("/api/v1/billing/usage-history", {}, token),
 
   createCheckoutSession: (token: string, planId: string, billingPeriod: "monthly" | "annual" = "monthly") =>
     request<{ checkout_url: string }>(
