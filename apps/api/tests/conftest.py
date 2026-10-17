@@ -1,3 +1,4 @@
+import os
 import tempfile
 from collections.abc import AsyncGenerator, Generator
 
@@ -36,18 +37,36 @@ from app.services.storage import LocalFilesystemStorage, ObjectStorage  # noqa: 
 
 # A fresh in-memory SQLite database per test keeps tests isolated and fast,
 # while still exercising the real SQLAlchemy models and queries used
-# against Postgres in staging/production.
+# against Postgres in staging/production. Set POSTGRES_TEST_DATABASE_URL
+# to run this exact same suite against a real Postgres database instead
+# (e.g. postgresql+asyncpg://user:pass@localhost:5432/some_throwaway_db)
+# — see docs/CHECKLIST.md's "Post-Phase-7: verify the test suite against
+# real Postgres" section for why this exists: SQLite and Postgres differ
+# in ways that matter (datetime timezone round-tripping, case
+# sensitivity) and this suite had only ever run against SQLite, in CI
+# included, until that round. Point it at a database you don't mind
+# being wiped — every test drops and recreates the full schema first.
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
+POSTGRES_TEST_DATABASE_URL = os.environ.get("POSTGRES_TEST_DATABASE_URL")
 
 
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if POSTGRES_TEST_DATABASE_URL:
+        engine = create_async_engine(POSTGRES_TEST_DATABASE_URL)
+    else:
+        engine = create_async_engine(
+            TEST_DATABASE_URL,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
     async with engine.begin() as conn:
+        if POSTGRES_TEST_DATABASE_URL:
+            # Real Postgres is a shared, persistent database across test
+            # runs (unlike SQLite's fresh in-memory DB per test) — drop
+            # first so each test starts from a genuinely clean schema,
+            # the same guarantee SQLite gives for free.
+            await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     session_maker = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)

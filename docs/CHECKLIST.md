@@ -560,13 +560,10 @@ could be written honestly rather than guessed.
   notification when a new version is uploaded (the brief's "offer
   updated dashboards and reports" is not automatic; comparison must
   still be requested, just no longer by knowing raw version numbers).
-- ⬜ SQLite vs. Postgres datetime quirk, newly relevant for scheduled
-  reports: SQLite drops timezone info from `DateTime(timezone=True)`
-  columns on round-trip (returns naive datetimes); Postgres preserves
-  it. Functionally harmless (comparisons within one DB are consistent),
-  but a test or any code comparing a DB-read datetime against a
-  freshly-constructed timezone-aware one needs to normalize first — see
-  the comment in `tests/test_scheduled_reports.py`.
+- ✅ SQLite vs. Postgres datetime quirk — the whole test suite is now
+  actually run against real Postgres (not just documented as a known
+  risk) and the 3 real failures it surfaced are fixed; see
+  "Post-Phase-7: verify the test suite against real Postgres" below.
 
 ## Phase 7 — Enterprise
 
@@ -3463,6 +3460,75 @@ scanned, a real security gap, not just a missing nicety.
   framing that still described the dataset upload pipeline and AI
   analyst as not yet built.
 
+## Post-Phase-7: verify the test suite against real Postgres
+
+The other option from the same fork as real malware/AV scanning (the
+user picked malware scanning first); the last remaining self-contained
+technical gap once that round closed. This codebase has run entirely
+on SQLite since Phase 1 — including in CI — despite production
+targeting Postgres (`DATABASE_URL=postgresql+asyncpg://...`), a gap
+this document itself had flagged as a recommendation since very early
+in the project without anyone acting on it.
+
+- ✅ **`tests/conftest.py`**: `db_session` now checks for a
+  `POSTGRES_TEST_DATABASE_URL` environment variable — unset (the
+  default everywhere, dev and CI alike), behavior is 100% unchanged
+  (the same in-memory SQLite engine as before, verified by rerunning
+  the full suite with nothing set). Set, every test instead runs
+  against that real Postgres database: `drop_all` then `create_all`
+  at the start of each test gives it the same "fresh, empty schema per
+  test" guarantee SQLite's in-memory engine provides for free — the
+  real database is persistent and shared across the run, unlike
+  SQLite's throwaway per-connection instance, so this has to be done
+  explicitly.
+- 🐛 **Found and fixed 3 real test failures** the very first full run
+  against real Postgres surfaced — proving this gap was real, not
+  theoretical: `TypeError: can't compare offset-naive and offset-aware
+  datetimes` in `tests/test_scheduled_reports.py`. Root cause: SQLite
+  drops timezone info from a `DateTime(timezone=True)` column on
+  round-trip (returns naive datetimes); Postgres preserves it (returns
+  aware ones). Three assertions in that file had been written assuming
+  SQLite's naive-only behavior (`now.replace(tzinfo=None)`, with a
+  comment explicitly citing SQLite) — correct against SQLite, broken
+  against Postgres. Fixed using the exact idiom this codebase had
+  *already* established for this exact problem, independently, twice
+  before (`app/services/email_tokens.py`'s `get_token` and
+  `app/services/sso.py`'s `consume_login_state`, both pre-existing):
+  `now.replace(tzinfo=<the DB-read value's own tzinfo>)` — matches
+  whichever the database actually returned rather than assuming one,
+  so the comparison is valid against either backend. Confirmed this
+  wasn't an application-layer bug: the three failures were all in test
+  assertions comparing Python datetime objects after fetching them;
+  the actual scheduler logic (`app/services/scheduled_reports.py`,
+  `app/services/distributed_lock.py`) only ever compares datetimes
+  inside SQL `WHERE` clauses, evaluated by the database itself, which
+  has no such mismatch.
+- ✅ **`infra/docker-compose.yml`-matching CI job**: a new
+  `backend-tests-postgres` job in `.github/workflows/ci.yml` runs the
+  identical `pytest -q` suite against a real `postgres:16-alpine`
+  service container (same image/version `infra/docker-compose.yml`
+  already uses), alongside the existing SQLite-based `backend-tests`
+  job — both now gate every push/PR to `main`, so this stays verified
+  going forward rather than being a one-off local check that silently
+  rots again.
+- ✅ **Verified with real local Postgres**, not just CI's container:
+  `brew install postgresql@16` (matching the same major version), the
+  full suite run against it directly with `POSTGRES_TEST_DATABASE_URL`
+  pointed at a real local database created and dropped for this
+  purpose — 365/365 passing, identical to the SQLite run (same pass
+  count, same 8 skips). Confirmed with the *exact* connection string
+  and role/database name the new CI job uses
+  (`datalume:datalume@localhost:5432/datalume_test`), not just a
+  conveniently-named local database, before trusting the CI job
+  definition. An unrelated, pre-existing Postgres database already
+  running locally on this machine (a completely different
+  application's schema, sharing the same server) was identified and
+  left untouched — a dedicated throwaway database was created, used,
+  and dropped instead.
+- ✅ Automated backend tests: 365/365 passing against SQLite (unchanged)
+  and 365/365 passing against real Postgres (3 fixed this round) — both
+  now run on every CI push/PR.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -3470,10 +3536,14 @@ scanned, a real security gap, not just a missing nicety.
   below.
 - ~~No rate limiting on auth endpoints~~ — done, see "Post-Phase-7:
   auth endpoint rate limiting" below.
-- **SQLite in dev**: fine for this stage, but Postgres-specific behaviour
-  (e.g. case sensitivity, concurrent write behaviour) is not exercised by
-  the current test suite. Recommend adding a CI job that runs the same
-  tests against a real Postgres container before Phase 2 lands.
+- ~~SQLite in dev: Postgres-specific behaviour not exercised by the test
+  suite; recommend a CI job running the same tests against real
+  Postgres~~ — done, see "Post-Phase-7: verify the test suite against
+  real Postgres" below. One genuine divergence found and fixed
+  (datetime timezone round-tripping); concurrent-write behavior
+  specifically still isn't exercised by any test (SQLite or Postgres) —
+  this closes the "never run against real Postgres at all" gap, not
+  every possible Postgres-specific scenario.
 - **`JWT_SECRET` has an insecure default** — the app will run with it, but
   anyone deploying beyond localhost must override it (see docs/SECURITY.md).
 - ~~Organizations: no way to remove a member or change their role once

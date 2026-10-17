@@ -147,12 +147,15 @@ async def test_run_due_scheduled_reports_generates_and_reschedules(
     assert generated[0].file_size_bytes > 0
 
     await db_session.refresh(scheduled)
-    # SQLite drops tzinfo on round-trip (returns naive datetimes), unlike
-    # Postgres — compare naive-to-naive since the stored instant is what
-    # matters, not which driver's DateTime(timezone=True) handling this is.
-    assert scheduled.last_run_at == now.replace(tzinfo=None)
+    # SQLite drops tzinfo on DateTime(timezone=True) round-trip (naive
+    # datetimes returned); Postgres preserves it. Matching tzinfo to
+    # whichever the DB actually returned (same idiom as
+    # app/services/email_tokens.py and app/services/sso.py) keeps the
+    # comparison valid against either backend — the stored instant is
+    # UTC regardless of the label.
+    assert scheduled.last_run_at == now.replace(tzinfo=scheduled.last_run_at.tzinfo)
     assert scheduled.last_error is None
-    assert scheduled.next_run_at == (now + dt.timedelta(days=1)).replace(tzinfo=None)
+    assert scheduled.next_run_at == (now + dt.timedelta(days=1)).replace(tzinfo=scheduled.next_run_at.tzinfo)
 
     reports_result = await db_session.execute(select(Report).where(Report.dataset_table_id == table_id))
     assert len(list(reports_result.scalars().all())) == 1
@@ -260,7 +263,7 @@ async def test_run_due_scheduled_reports_emails_the_creator_with_pdf_attached(
     assert message.attachments[0].content.startswith(b"%PDF-")
 
     scheduled = await db_session.get(ScheduledReport, scheduled_id)
-    assert scheduled.last_email_sent_at == now.replace(tzinfo=None)
+    assert scheduled.last_email_sent_at == now.replace(tzinfo=scheduled.last_email_sent_at.tzinfo)
     assert scheduled.last_email_error is None
 
 
@@ -418,7 +421,10 @@ async def test_run_due_scheduled_reports_skips_when_another_replica_holds_the_lo
 
     scheduled = await db_session.get(ScheduledReport, scheduled_id)
     assert scheduled.last_run_at is None  # completely untouched, not just "no reports returned"
-    assert scheduled.next_run_at <= now.replace(tzinfo=None)  # still due — will be picked up next tick
+    # still due — will be picked up next tick (tzinfo matched to the
+    # DB's own round-trip behavior, same idiom as the other assertions
+    # in this file — see the comment above the first one)
+    assert scheduled.next_run_at <= now.replace(tzinfo=scheduled.next_run_at.tzinfo)
 
     await release_lock(db_session, SCHEDULER_LOCK_ID, other_replica_holder)
 
