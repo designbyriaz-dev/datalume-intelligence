@@ -191,6 +191,9 @@ export default function DashboardPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
+  const [resendBusy, setResendBusy] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+  const [resendError, setResendError] = useState<string | null>(null);
 
   const openBillingPortal = async () => {
     if (!token) return;
@@ -202,6 +205,20 @@ export default function DashboardPage() {
     } catch (err) {
       setPortalError(err instanceof ApiError ? err.message : "Could not open billing portal.");
       setPortalBusy(false);
+    }
+  };
+
+  const onResendVerification = async () => {
+    if (!user) return;
+    setResendBusy(true);
+    setResendError(null);
+    try {
+      await api.resendVerification(user.email);
+      setResendSent(true);
+    } catch (err) {
+      setResendError(err instanceof ApiError ? err.message : "Could not send verification email.");
+    } finally {
+      setResendBusy(false);
     }
   };
 
@@ -237,6 +254,28 @@ export default function DashboardPage() {
           Create a workspace, then open it to upload a CSV or Excel file and see its data quality
           profile.
         </p>
+
+        {!user.is_verified && (
+          <div className="mt-6 rounded-lg border border-amber-300 bg-amber-50 px-5 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            {resendSent ? (
+              <span>Verification email sent — check your inbox at {user.email}.</span>
+            ) : (
+              <>
+                <span className="font-medium">Please verify your email address.</span>{" "}
+                We sent a link to {user.email} when you registered.{" "}
+                <button
+                  type="button"
+                  onClick={onResendVerification}
+                  disabled={resendBusy}
+                  className="font-medium underline disabled:opacity-60"
+                >
+                  {resendBusy ? "Sending…" : "Resend verification email"}
+                </button>
+              </>
+            )}
+            {resendError && <span className="mt-1 block text-red-700 dark:text-red-400">{resendError}</span>}
+          </div>
+        )}
 
         {subscription && (
           <div className="mt-6 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-5 py-3 dark:border-slate-800">

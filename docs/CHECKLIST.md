@@ -828,9 +828,9 @@ OIDC above.
   the full accept-invite and reset-password flows were driven through
   the actual browser UI — including a separate API call afterward
   confirming the resulting `Membership` and password change were real,
-  not just a UI state change. The dashboard does not yet prompt an
-  unverified user to check their email (no banner/reminder) — the only
-  remaining frontend gap.
+  not just a UI state change. ~~The dashboard does not yet prompt an
+  unverified user to check their email (no banner/reminder)~~ — done,
+  see "Post-Phase-7: dashboard email-verification banner" below.
 
 ## Post-Phase-7: more cleaning operations
 
@@ -3863,6 +3863,45 @@ was written.
   pack's own precise KPI calculators directly, rather than only generic
   statistics tools, for questions a dedicated KPI already answers more
   rigorously.
+
+## Post-Phase-7: dashboard email-verification banner
+
+A genuinely self-contained gap this document had already named
+precisely (in the Phase 7 transactional-email section's own closing
+line) but never actioned: the backend has had a real
+`POST /auth/resend-verification` endpoint and `User.is_verified` since
+the transactional-email round, and the frontend API client already had
+a typed `resendVerification(email)` method — but nothing in the UI ever
+called it. An unverified user who dismissed or lost their original
+email had no way to get another one short of the exact verification
+link.
+
+- ✅ **Dashboard banner** (`apps/web/src/app/dashboard/page.tsx`): shown
+  whenever `user.is_verified` is `false`, with a real "Resend
+  verification email" button wired to the existing
+  `api.resendVerification` call — the first real caller of a method
+  that had existed, unused, since the transactional-email round (same
+  shape of gap as the dunning round's Billing Portal button). Confirms
+  success in place ("Verification email sent — check your inbox at
+  {email}.") rather than just clearing a loading state, and shows a
+  real error message if the send fails (e.g. the existing 5-per-hour
+  rate limit on this endpoint).
+- ✅ Frontend: 70/70 passing (4 new, in `app/dashboard/page.test.tsx`):
+  the banner appears for an unverified user and stays hidden for a
+  verified one, resending calls the real API method with the user's
+  actual email and confirms success, and a failed resend shows a clear
+  error. `npx tsc --noEmit` and `npm run build` both clean. No backend
+  changes this round — both endpoints it calls already existed and were
+  already tested.
+- ✅ **Verified live against the real running server**: registered a
+  genuinely new, unverified account through the real UI (not a mocked
+  one), confirmed the banner appeared with that account's real email
+  address, clicked the real "Resend verification email" button, and
+  confirmed via the live server's own logs a real `202 Accepted` with
+  no exception — using the same real Gmail SMTP path already verified
+  end-to-end (a real email landing in a real inbox) earlier in this
+  project, so a second manual inbox check for this specific UI addition
+  wasn't necessary.
 
 ## Known limitations in what's built
 

@@ -30,6 +30,7 @@ const mockApi = vi.hoisted(() => ({
   listIndustryPacks: vi.fn(),
   createWorkspace: vi.fn(),
   createPortalSession: vi.fn(),
+  resendVerification: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -242,5 +243,46 @@ describe("DashboardPage past-due billing banner", () => {
     await user.click(screen.getByRole("button", { name: "Update payment method" }));
 
     expect(await screen.findByText("Could not open billing portal.")).toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage email verification banner", () => {
+  it("shows a verification prompt for an unverified user", async () => {
+    mockUseAuth.mockReturnValue(authedState({ user: { ...REAL_USER, is_verified: false } }));
+    render(<DashboardPage />);
+
+    expect(await screen.findByText("Please verify your email address.")).toBeInTheDocument();
+    expect(screen.getByText(/jane@example.com/)).toBeInTheDocument();
+  });
+
+  it("does not show the banner for a verified user", async () => {
+    mockUseAuth.mockReturnValue(authedState());
+    render(<DashboardPage />);
+
+    await screen.findByText("Your workspaces");
+    expect(screen.queryByText("Please verify your email address.")).not.toBeInTheDocument();
+  });
+
+  it("resending the verification email calls the real endpoint and confirms it was sent", async () => {
+    mockUseAuth.mockReturnValue(authedState({ user: { ...REAL_USER, is_verified: false } }));
+    mockApi.resendVerification.mockResolvedValue({ message: "sent" });
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Resend verification email" }));
+
+    await waitFor(() => expect(mockApi.resendVerification).toHaveBeenCalledWith("jane@example.com"));
+    expect(await screen.findByText(/Verification email sent/)).toBeInTheDocument();
+  });
+
+  it("shows an error if resending fails", async () => {
+    mockUseAuth.mockReturnValue(authedState({ user: { ...REAL_USER, is_verified: false } }));
+    mockApi.resendVerification.mockRejectedValue(new Error("Too many requests"));
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Resend verification email" }));
+
+    expect(await screen.findByText("Could not send verification email.")).toBeInTheDocument();
   });
 });
