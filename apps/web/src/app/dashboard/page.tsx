@@ -6,7 +6,7 @@ import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
 import { api, type IndustryPack, type Organization, type Subscription, type Workspace, ApiError } from "@/lib/api";
-import { resetCountdownLabel } from "@/lib/format";
+import { daysUntil, resetCountdownLabel } from "@/lib/format";
 
 // Industries with no dedicated pack (app/core/industry_packs.py has no
 // entry for these) — kept as a plain dropdown behind "Something else",
@@ -190,6 +190,21 @@ export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+
+  const openBillingPortal = async () => {
+    if (!token) return;
+    setPortalBusy(true);
+    setPortalError(null);
+    try {
+      const { portal_url } = await api.createPortalSession(token);
+      window.location.href = portal_url;
+    } catch (err) {
+      setPortalError(err instanceof ApiError ? err.message : "Could not open billing portal.");
+      setPortalBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -251,6 +266,24 @@ export default function DashboardPage() {
                 {subscription.plan_id === "free" ? "Upgrade plan" : "Manage plan"}
               </Link>
             </div>
+          </div>
+        )}
+
+        {subscription?.status === "past_due" && subscription.downgrade_scheduled_for && (
+          <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-5 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+            <span className="font-medium">We couldn&apos;t process your last payment.</span> Your{" "}
+            {subscription.plan_id} plan will be downgraded to Free in{" "}
+            {daysUntil(subscription.downgrade_scheduled_for)} day
+            {daysUntil(subscription.downgrade_scheduled_for) === 1 ? "" : "s"} unless it&apos;s resolved.{" "}
+            <button
+              type="button"
+              onClick={openBillingPortal}
+              disabled={portalBusy}
+              className="font-medium underline disabled:opacity-60"
+            >
+              {portalBusy ? "Opening…" : "Update payment method"}
+            </button>
+            {portalError && <span className="mt-1 block text-red-700 dark:text-red-400">{portalError}</span>}
           </div>
         )}
 

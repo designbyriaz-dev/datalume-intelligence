@@ -9,6 +9,7 @@ untested, not the cryptographic verification itself or the business
 logic that reacts to the event.
 """
 
+import datetime as dt
 import hashlib
 import hmac
 import json
@@ -16,8 +17,10 @@ import os
 import time
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.models.billing import Subscription
 
 WEBHOOK_SECRET = "whsec_test_secret_for_local_testing_only"
 
@@ -418,6 +421,202 @@ async def test_webhook_subscription_deleted_audit_logs_the_plan_it_was_canceled_
     finally:
         del os.environ["STRIPE_PRICE_ID_PROFESSIONAL_MONTHLY"]
         get_settings.cache_clear()
+
+
+async def test_webhook_invoice_payment_failed_marks_past_due_and_starts_grace_period(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token = await _register_and_login(client, "pastdue1@example.com")
+    sub_resp = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    subscription_id = sub_resp.json()["id"]
+
+    async def activate():
+        payload = json.dumps(
+            {
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "client_reference_id": subscription_id,
+                        "customer": "cus_pastdue1",
+                        "subscription": "sub_pastdue1",
+                    }
+                },
+            }
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, activate)
+
+    before = dt.datetime.now(dt.timezone.utc)
+
+    async def fail():
+        payload = json.dumps(
+            {"type": "invoice.payment_failed", "data": {"object": {"customer": "cus_pastdue1"}}}
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, fail)
+
+    final = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    body = final.json()
+    assert body["status"] == "past_due"
+    assert body["past_due_since"] is not None
+
+    # Real timestamp from "now", not a placeholder — checked against the
+    # DB's own value directly (not the API's JSON, which round-trips
+    # through SQLite's naive-datetime serialization — see
+    # docs/CHECKLIST.md's "Post-Phase-7: verify the test suite against
+    # real Postgres" section) using the same tzinfo-matching idiom
+    # established there and in app/services/email_tokens.py/sso.py.
+    subscription = await db_session.get(Subscription, subscription_id)
+    assert subscription.past_due_since >= before.replace(tzinfo=subscription.past_due_since.tzinfo) - dt.timedelta(
+        seconds=5
+    )
+
+    # The API's own computed field: exactly 7 days after past_due_since.
+    from app.services.dunning import DEFAULT_GRACE_PERIOD
+
+    assert body["downgrade_scheduled_for"] is not None
+    expected = subscription.past_due_since + DEFAULT_GRACE_PERIOD
+    actual = dt.datetime.fromisoformat(body["downgrade_scheduled_for"]).replace(tzinfo=expected.tzinfo)
+    assert abs((actual - expected).total_seconds()) < 1
+
+
+async def test_webhook_invoice_payment_failed_does_not_reset_an_already_running_grace_period(
+    client: AsyncClient,
+) -> None:
+    """Stripe's own smart retries fire several invoice.payment_failed
+    events across the grace period — the second (and third, ...) one
+    must not push the dunning clock back out, or the grace period would
+    never actually expire."""
+    token = await _register_and_login(client, "pastdue2@example.com")
+    sub_resp = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    subscription_id = sub_resp.json()["id"]
+
+    async def activate():
+        payload = json.dumps(
+            {
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "client_reference_id": subscription_id,
+                        "customer": "cus_pastdue2",
+                        "subscription": "sub_pastdue2",
+                    }
+                },
+            }
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, activate)
+
+    async def fail():
+        payload = json.dumps(
+            {"type": "invoice.payment_failed", "data": {"object": {"customer": "cus_pastdue2"}}}
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, fail)
+    first = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    first_past_due_since = first.json()["past_due_since"]
+
+    await _with_stripe_configured(client, fail)  # a second failed-retry event
+    second = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    assert second.json()["past_due_since"] == first_past_due_since
+
+
+async def test_webhook_subscription_recovering_to_active_clears_the_grace_period(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "pastdue3@example.com")
+    sub_resp = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    subscription_id = sub_resp.json()["id"]
+
+    async def activate():
+        payload = json.dumps(
+            {
+                "type": "checkout.session.completed",
+                "data": {
+                    "object": {
+                        "client_reference_id": subscription_id,
+                        "customer": "cus_pastdue3",
+                        "subscription": "sub_pastdue3",
+                    }
+                },
+            }
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, activate)
+
+    async def fail():
+        payload = json.dumps(
+            {"type": "invoice.payment_failed", "data": {"object": {"customer": "cus_pastdue3"}}}
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, fail)
+    mid = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    assert mid.json()["status"] == "past_due"
+    assert mid.json()["past_due_since"] is not None
+
+    async def recover():
+        payload = json.dumps(
+            {
+                "type": "customer.subscription.updated",
+                "data": {
+                    "object": {
+                        "id": "sub_pastdue3",
+                        "customer": "cus_pastdue3",
+                        "status": "active",
+                        "current_period_end": 1999999999,
+                        "cancel_at_period_end": False,
+                        "items": {"data": []},
+                    }
+                },
+            }
+        ).encode()
+        resp = await client.post(
+            "/api/v1/billing/webhook",
+            content=payload,
+            headers={"stripe-signature": _sign(payload, WEBHOOK_SECRET), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    await _with_stripe_configured(client, recover)
+
+    final = await client.get("/api/v1/billing/subscription", headers=_auth(token))
+    body = final.json()
+    assert body["status"] == "active"
+    assert body["past_due_since"] is None
 
 
 async def test_webhook_ignores_unhandled_event_types(client: AsyncClient) -> None:

@@ -35,6 +35,16 @@ class SubscriptionOut(BaseModel):
     billing_period: str | None
     current_period_end: object | None
     cancel_at_period_end: bool
+    past_due_since: object | None = Field(
+        description="Set while status is 'past_due' — when the current grace period started. "
+        "None otherwise."
+    )
+    downgrade_scheduled_for: object | None = Field(
+        description="past_due_since + the dunning grace period (app/services/dunning.py) — when "
+        "this subscription will be downgraded to Free if payment isn't resolved first. None "
+        "unless status is 'past_due'. Computed server-side so the frontend doesn't need to know "
+        "the grace period's length."
+    )
     usage: UsageOut
 
 

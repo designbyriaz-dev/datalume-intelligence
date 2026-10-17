@@ -61,6 +61,20 @@ class Settings(BaseSettings):
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
 
+    # Stripe Tax: automatically calculates and applies VAT/sales tax on
+    # Checkout sessions — see app/services/stripe_billing.py. Off by
+    # default, deliberately: it requires a one-time Stripe Dashboard
+    # step first (a "head office address" under Settings > Tax —
+    # https://dashboard.stripe.com/test/settings/tax in test mode) that
+    # genuinely cannot be done from code (it's real business/legal
+    # information, not something to fabricate), and enabling this
+    # without that step done first makes Checkout session creation
+    # fail outright — confirmed against this project's real Stripe
+    # test-mode account: "You must have a valid head office address to
+    # enable automatic tax calculation in test mode." Flip to true once
+    # that Dashboard step is complete.
+    stripe_tax_enabled: bool = False
+
     # Where Stripe Checkout/Billing Portal should redirect back to.
     frontend_base_url: str = "http://localhost:3000"
 

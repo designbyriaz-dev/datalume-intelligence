@@ -51,6 +51,15 @@ class Subscription(UUIDPKMixin, TimestampMixin, Base):
     current_period_end: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # When this subscription first went PAST_DUE in its current dunning
+    # cycle — set once on the first invoice.payment_failed webhook, left
+    # untouched by any further failed-retry events in the same cycle
+    # (Stripe's own smart retries fire several over the grace period),
+    # and cleared the moment it recovers (back to ACTIVE) or the grace
+    # period expires and it's downgraded. None whenever status isn't
+    # PAST_DUE. See app/services/dunning.py.
+    past_due_since: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     usage_counters: Mapped[list["UsageCounter"]] = relationship(
         back_populates="subscription", cascade="all, delete-orphan"
     )

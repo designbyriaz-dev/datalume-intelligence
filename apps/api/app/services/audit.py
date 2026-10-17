@@ -14,6 +14,8 @@ Currently recorded, and where:
 - api_key.revoked            — app/api/v1/routers/api_keys.py
 - billing.plan_changed       — app/services/webhook_handlers.py
 - billing.subscription_canceled — app/services/webhook_handlers.py
+- billing.downgraded_for_nonpayment — app/services/dunning.py (the
+  grace-period timeout, distinct from an explicit customer cancellation)
 - admin.user_data_accessed   — app/api/v1/routers/admin.py (every time a
   platform admin lists user records — the brief's requirement that
   "customer data access by platform administrators must be ... audited")
@@ -45,6 +47,7 @@ EVENT_TYPES = {
     "api_key.revoked",
     "billing.plan_changed",
     "billing.subscription_canceled",
+    "billing.downgraded_for_nonpayment",
     "admin.user_data_accessed",
     "auth.email_verified",
     "auth.password_reset_completed",

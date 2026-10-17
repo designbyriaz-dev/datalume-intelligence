@@ -87,7 +87,14 @@ async def handle_subscription_updated(db: AsyncSession, event_object: dict[str, 
         "unpaid": SubscriptionStatus.PAST_DUE,
     }
     if stripe_status in status_map:
-        subscription.status = status_map[stripe_status]
+        new_status = status_map[stripe_status]
+        # Recovered (a Stripe retry succeeded) — clear the dunning clock
+        # so a *future* payment failure starts a fresh grace period
+        # rather than being instantly overdue from a stale timestamp.
+        # See app/services/dunning.py.
+        if new_status == SubscriptionStatus.ACTIVE and subscription.status == SubscriptionStatus.PAST_DUE:
+            subscription.past_due_since = None
+        subscription.status = new_status
 
     items = event_object.get("items", {}).get("data", [])
     if items:
@@ -141,6 +148,7 @@ async def handle_subscription_deleted(db: AsyncSession, event_object: dict[str, 
 
     previous_plan_id = subscription.plan_id
     subscription.status = SubscriptionStatus.CANCELED
+    subscription.past_due_since = None  # no longer meaningful once canceled
     # Downgrade to free rather than leaving the account on a paid plan_id
     # with a canceled Stripe subscription — quota enforcement reads
     # plan_id directly, so this is what actually takes the entitlements
@@ -171,6 +179,13 @@ async def handle_invoice_payment_failed(db: AsyncSession, event_object: dict[str
         return
 
     subscription.status = SubscriptionStatus.PAST_DUE
+    # Only set on the FIRST failure of a dunning cycle — Stripe's own
+    # smart retries fire several invoice.payment_failed events over the
+    # grace period, and resetting the clock on each one would mean the
+    # grace period never actually expires. See app/services/dunning.py,
+    # which reads this to decide when the grace period is up.
+    if subscription.past_due_since is None:
+        subscription.past_due_since = datetime.now(timezone.utc)
     await db.commit()
 
 

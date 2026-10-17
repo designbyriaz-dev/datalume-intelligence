@@ -9,10 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
+from app.services.dunning import downgrade_overdue_subscriptions
 from app.services.email import EmailNotConfiguredError, get_email_sender
 from app.services.rate_limit import purge_expired_windows
 from app.services.scheduled_reports import run_due_scheduled_reports
 from app.services.storage import get_storage
+from app.services.stripe_billing import BillingNotConfiguredError, get_stripe_client
 
 settings = get_settings()
 logger = logging.getLogger("datalume.scheduler")
@@ -31,6 +33,14 @@ _SCHEDULER_INTERVAL_MINUTES = 5
 _RATE_LIMIT_CLEANUP_INTERVAL_MINUTES = 60
 _RATE_LIMIT_WINDOW_RETENTION = dt.timedelta(hours=6)
 
+# How often the in-process scheduler checks for subscriptions whose
+# dunning grace period has expired. The grace period itself (see
+# app/services/dunning.py's DEFAULT_GRACE_PERIOD) is measured in days,
+# so this only needs to be frequent enough that a subscription doesn't
+# sit downgrade-eligible for long after its grace period actually ends
+# — it does NOT need to match the grace period's own length.
+_DUNNING_INTERVAL_MINUTES = 60
+
 
 async def _run_due_scheduled_reports_tick() -> None:
     try:
@@ -48,6 +58,26 @@ async def _run_due_scheduled_reports_tick() -> None:
         logger.exception("Scheduled report tick failed.")
 
 
+async def _downgrade_overdue_subscriptions_tick() -> None:
+    try:
+        try:
+            email_sender = get_email_sender()
+        except EmailNotConfiguredError:
+            email_sender = None
+        try:
+            stripe_client = get_stripe_client()
+        except BillingNotConfiguredError:
+            stripe_client = None
+        async with AsyncSessionLocal() as db:
+            downgraded = await downgrade_overdue_subscriptions(
+                db, email_sender=email_sender, stripe_client=stripe_client
+            )
+            if downgraded:
+                logger.info("Downgraded %d overdue subscription(s) for non-payment.", len(downgraded))
+    except Exception:
+        logger.exception("Dunning tick failed.")
+
+
 async def _purge_expired_rate_limit_windows_tick() -> None:
     try:
         async with AsyncSessionLocal() as db:
@@ -63,6 +93,7 @@ async def _purge_expired_rate_limit_windows_tick() -> None:
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
     scheduler.add_job(_run_due_scheduled_reports_tick, "interval", minutes=_SCHEDULER_INTERVAL_MINUTES)
+    scheduler.add_job(_downgrade_overdue_subscriptions_tick, "interval", minutes=_DUNNING_INTERVAL_MINUTES)
     scheduler.add_job(
         _purge_expired_rate_limit_windows_tick, "interval", minutes=_RATE_LIMIT_CLEANUP_INTERVAL_MINUTES
     )

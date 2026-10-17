@@ -29,6 +29,7 @@ const mockApi = vi.hoisted(() => ({
   listOrganizations: vi.fn(),
   listIndustryPacks: vi.fn(),
   createWorkspace: vi.fn(),
+  createPortalSession: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -168,5 +169,68 @@ describe("the guided workspace-creation flow", () => {
 
     expect(screen.getByText("What do you want to analyse?")).toBeInTheDocument();
     expect(mockApi.createWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+function pastDueSubscription(daysUntilDowngrade: number) {
+  const now = Date.now();
+  return {
+    id: "sub1",
+    owner_user_id: "u1",
+    organization_id: null,
+    plan_id: "professional",
+    status: "past_due",
+    billing_period: "monthly",
+    current_period_end: null,
+    cancel_at_period_end: false,
+    past_due_since: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    downgrade_scheduled_for: new Date(now + daysUntilDowngrade * 24 * 60 * 60 * 1000).toISOString(),
+    usage: { period_key: "2026-10", analyses_used: 3, analyses_limit: 100, resets_at: new Date(now).toISOString() },
+  };
+}
+
+describe("DashboardPage past-due billing banner", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue(authedState());
+  });
+
+  it("shows a warning banner with the days remaining when the subscription is past_due", async () => {
+    mockApi.getSubscription.mockResolvedValue(pastDueSubscription(5));
+    render(<DashboardPage />);
+
+    expect(await screen.findByText(/couldn't process your last payment/i)).toBeInTheDocument();
+    expect(screen.getByText(/downgraded to Free in 5 days/)).toBeInTheDocument();
+  });
+
+  it("does not show the banner for an active subscription", async () => {
+    mockApi.getSubscription.mockResolvedValue({ ...pastDueSubscription(5), status: "active" });
+    render(<DashboardPage />);
+
+    await screen.findByText("Your workspaces");
+    expect(screen.queryByText(/couldn't process your last payment/i)).not.toBeInTheDocument();
+  });
+
+  it("'Update payment method' opens the real Stripe billing portal", async () => {
+    mockApi.getSubscription.mockResolvedValue(pastDueSubscription(1));
+    mockApi.createPortalSession.mockResolvedValue({ portal_url: "https://billing.stripe.com/session/test" });
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await screen.findByText(/downgraded to Free in 1 day\b/);
+    await user.click(screen.getByRole("button", { name: "Update payment method" }));
+
+    await waitFor(() => expect(mockApi.createPortalSession).toHaveBeenCalledWith("tok1"));
+  });
+
+  it("shows an error if opening the billing portal fails", async () => {
+    mockApi.getSubscription.mockResolvedValue(pastDueSubscription(1));
+    mockApi.createPortalSession.mockRejectedValue(new Error("Stripe not configured"));
+    const user = userEvent.setup();
+    render(<DashboardPage />);
+
+    await screen.findByText(/downgraded to Free/);
+    await user.click(screen.getByRole("button", { name: "Update payment method" }));
+
+    expect(await screen.findByText("Could not open billing portal.")).toBeInTheDocument();
   });
 });

@@ -19,6 +19,7 @@ from app.schemas.billing import (
 )
 from app.services import billing
 from app.services.authz import require_membership, require_org_manager
+from app.services.dunning import DEFAULT_GRACE_PERIOD
 from app.services.stripe_billing import StripeBillingClient
 from app.services.webhook_handlers import handle_stripe_event
 
@@ -83,6 +84,10 @@ async def _to_subscription_out(db: AsyncSession, subscription: Subscription) -> 
         billing_period=subscription.billing_period,
         current_period_end=subscription.current_period_end,
         cancel_at_period_end=subscription.cancel_at_period_end,
+        past_due_since=subscription.past_due_since,
+        downgrade_scheduled_for=(
+            subscription.past_due_since + DEFAULT_GRACE_PERIOD if subscription.past_due_since else None
+        ),
         usage=UsageOut(
             period_key=period_key,
             analyses_used=analyses_used,

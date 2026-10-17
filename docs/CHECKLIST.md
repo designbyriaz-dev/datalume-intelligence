@@ -346,12 +346,17 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
   production Stripe account processing real cards — that distinction
   stands the same way it does for every other "verified" integration
   in this project.
-- ⬜ No failed-payment dunning flow beyond marking the subscription
-  `past_due` on `invoice.payment_failed` — no retry scheduling, no
-  customer email, no automatic downgrade after repeated failures.
-- ⬜ VAT handling — not implemented; Stripe Tax or manual VAT
-  configuration would need to be set up in the Stripe Dashboard and
-  wired through Checkout Session creation (`automatic_tax` parameter).
+- ✅ Failed-payment dunning flow — a 7-day grace period, a single
+  customer email on final downgrade (not one per Stripe retry), and
+  automatic downgrade (local + a real Stripe-side cancellation) once
+  the grace period expires; see "Post-Phase-7: dunning flow and VAT via
+  Stripe Tax" below.
+- ✅⚠️ VAT handling via Stripe Tax — wired into Checkout Session
+  creation (`automatic_tax`), gated behind `STRIPE_TAX_ENABLED` (off by
+  default). Still open: the Stripe Dashboard's own one-time "head
+  office address" setup, which only the account holder can do — see
+  that same section for exactly what's needed and why this can't be
+  flipped on by this code alone.
 - ✅ Admin visibility into subscriptions/MRR exists as of Phase 7's
   admin dashboard (`subscriptions_by_plan`, `estimated_mrr_gbp`) — see
   the Phase 7 section below. Churn specifically (subscriptions lost
@@ -3529,6 +3534,123 @@ in the project without anyone acting on it.
   and 365/365 passing against real Postgres (3 fixed this round) — both
   now run on every CI push/PR.
 
+## Post-Phase-7: dunning flow and VAT via Stripe Tax
+
+The user picked this explicitly, answering three concrete policy
+questions directly (the kind of decision this document has repeatedly
+said only the user can make — "no VAT policy" and "no dunning policy"
+have sat in the checklist's ⬜ list since Phase 4): a 7-day grace
+period, a single email on final downgrade only (not one per Stripe
+retry), and Stripe Tax for VAT.
+
+- ✅ **`Subscription.past_due_since`** (new column, migration
+  `a2e25f960d7b`): when the current dunning cycle started. Set once on
+  the *first* `invoice.payment_failed` webhook of a cycle
+  (`app/services/webhook_handlers.py`) — Stripe's own smart retries
+  fire several more over the grace period, and each would reset the
+  clock if this weren't idempotent, so the grace period would never
+  actually expire. Cleared the moment the subscription recovers (a
+  retry succeeds — `customer.subscription.updated` with `status:
+  active`) or gets canceled for any reason.
+- ✅ **`app/services/dunning.py`** (new):
+  `downgrade_overdue_subscriptions` — same shape as
+  `scheduled_reports.py`'s `run_due_scheduled_reports`: a distributed
+  lock (`app/services/distributed_lock.py`, so only one API replica
+  processes a tick), called from a new hourly APScheduler job in
+  `app/main.py`, and exercised directly by tests rather than by waiting
+  on wall-clock time. For every subscription whose `past_due_since` is
+  more than 7 days old: cancels the real Stripe subscription
+  (best-effort — the local downgrade, which is what actually controls
+  this app's own entitlements, must still happen even if Stripe is
+  unreachable), downgrades `plan_id` to `free`, records a new
+  `billing.downgraded_for_nonpayment` audit event (added to
+  `app/services/audit.py`'s `EVENT_TYPES`), and sends exactly one email
+  — to the subscription's owner for a personal account, or to *every*
+  member with the `OWNER` role for an organization account (an org can
+  have more than one).
+- ✅ **`StripeBillingClient.cancel_subscription`** (new) — verified its
+  exact call shape (`stripe.Subscription.cancel(subscription_id)`, a
+  real `@class_method_variant` on the installed SDK, not guessed)
+  against the actual installed `stripe==11.1.1` package before writing
+  the wrapper around it.
+- ✅ **`GET /billing/subscription` gained two fields**: `past_due_since`
+  and a server-computed `downgrade_scheduled_for` (`past_due_since +`
+  the grace period) — computed server-side specifically so the
+  frontend never needs to know the grace period's length as a
+  duplicated constant.
+- ✅ **Dashboard banner**: a warning shown whenever `status ===
+  "past_due"` ("We couldn't process your last payment. Your
+  {plan} plan will be downgraded to Free in N days…"), with a real
+  "Update payment method" button. That button wires up
+  `createPortalSession` — an API client method and backend endpoint
+  that already existed (Stripe Billing Portal, verified in an earlier
+  round) but was never actually called from anywhere in the UI until
+  now; the dunning banner is its first real caller.
+- ✅ **Stripe Tax wired into Checkout Session creation**
+  (`automatic_tax`, `billing_address_collection: "required"`,
+  `tax_id_collection` for EU reverse-charge) — gated behind a new
+  `STRIPE_TAX_ENABLED` setting, default `false`.
+- 🐛 **Found a real blocker before it could ship silently broken**:
+  the first attempt wired `automatic_tax` on unconditionally and
+  tested it against this project's real Stripe test-mode account
+  (`sk_test_...`, the same one Checkout/webhooks/Billing Portal were
+  already verified against). Real result: every Checkout session
+  creation call — including ones that don't touch tax at all — started
+  failing outright: *"You must have a valid head office address to
+  enable automatic tax calculation in test mode. Visit
+  https://dashboard.stripe.com/test/settings/tax to update it."* Stripe
+  Tax needs a one-time Dashboard step (the account's registered
+  business address) before it will calculate anything, and that's real
+  business/legal information this session has no business fabricating.
+  Rather than ship a change that breaks the already-working checkout
+  flow in this exact sandbox account, gated the whole thing behind
+  `STRIPE_TAX_ENABLED` (default `false`) — confirmed both states
+  against the real account: `false` reproduces the exact working
+  checkout session Checkout had before (no regression), `true`
+  reproduces the exact documented Dashboard error (proving the gate
+  itself, and the feature once the Dashboard step is done, both work).
+  Flip it on once that one Dashboard page is filled in.
+- ✅ Automated backend tests: 377/377 passing (12 new — 9 in
+  `tests/test_dunning.py` covering the grace-period math, Stripe
+  cancellation being best-effort, personal vs. multi-owner-org email
+  recipients, the audit event, and the distributed-lock skip; 3 in
+  `tests/test_billing_webhook.py` for `invoice.payment_failed`, which
+  had zero test coverage before this round — marking past_due and
+  starting the grace period, not resetting it on repeat failures, and
+  clearing it on recovery). Also re-verified against real Postgres
+  (see the section above) specifically because this round added new
+  `DateTime(timezone=True)` queries and comparisons — 377/377 there
+  too, identical to SQLite.
+- 🐛 **Found and fixed a second real naive/aware datetime bug while
+  writing the tests above** — the same class of bug fixed in the
+  Postgres-verification round, this time surfacing through
+  `SubscriptionOut`'s JSON serialization rather than a raw DB read: a
+  test asserting `past_due_since` was "recent" by comparing the API
+  response's parsed JSON datetime against `time.time()` was silently
+  off by exactly this machine's UTC offset (SQLite's naive round-trip
+  meant the JSON value carried no timezone marker, and Python's
+  `datetime.fromisoformat` on a naive string assumes local time). Fixed
+  the same way as before: compare against the DB's own value directly
+  with tzinfo matched to whatever it actually returned, not against a
+  value round-tripped through JSON.
+- ✅ Frontend: 66/66 passing (4 new, in
+  `app/dashboard/page.test.tsx`: the banner appears with the correct
+  day count for a past_due subscription, stays hidden for an active
+  one, and "Update payment method" both succeeds and fails
+  realistically against a mocked `createPortalSession`). `npx tsc
+  --noEmit` and `npm run build` both clean.
+- ✅ **Verified live against the real running server and the real
+  Stripe sandbox account, not just tests**: registered a real user,
+  created a real Stripe `Customer` via the API (not a fake ID),
+  manually advanced a subscription into a past-due state 2 days into
+  its grace period, and confirmed in the browser the banner read
+  exactly "We couldn't process your last payment. Your professional
+  plan will be downgraded to Free in 5 days unless it's resolved."
+  Clicked the real "Update payment method" button and confirmed the
+  browser actually navigated to a real `billing.stripe.com` session
+  showing the correct customer name and email — not a mock, not a
+  simulated redirect. Cleaned up the real test customer afterward.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -3636,7 +3758,11 @@ in the project without anyone acting on it.
    clean HTTP response.
 10. ~~A scheduled-reports UI in `apps/web`~~ — done, see "Post-Phase-7:
     scheduled reports frontend" above.
-11. VAT/tax handling via Stripe Tax once Checkout is live — not started.
+11. ~~VAT/tax handling via Stripe Tax~~ — wired into Checkout Session
+    creation, see "Post-Phase-7: dunning flow and VAT via Stripe Tax"
+    above. Gated behind `STRIPE_TAX_ENABLED` (default off): still needs
+    a one-time Stripe Dashboard step (the account's business address)
+    only the account holder can complete before it's actually live.
 12. ~~More specialist report templates~~ — two more done: a Compliance
     Exceptions Report for social_housing and a Repairs & Maintenance
     Report for residential_property (each pack's second report — see

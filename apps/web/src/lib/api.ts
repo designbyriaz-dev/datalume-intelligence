@@ -300,6 +300,8 @@ export interface Subscription {
   billing_period: string | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
+  past_due_since: string | null;
+  downgrade_scheduled_for: string | null;
   usage: {
     period_key: string;
     analyses_used: number;
