@@ -37,12 +37,16 @@ class Settings(BaseSettings):
     # rejected here before the plan check ever runs.
     max_upload_size_bytes: int = 1024 * 1024 * 1024  # 1 GB
 
-    # No real malware scanner is wired in yet (would require a ClamAV
-    # daemon or a cloud scanning API). Uploads are still validated by file
-    # signature, extension allow-list and a zip-bomb guard for XLSX — see
-    # app/services/upload_validation.py — but that is not equivalent to AV
-    # scanning. Keep this False until a real scanner is integrated.
+    # Real malware scanning via a ClamAV daemon (clamd) — see
+    # app/services/malware_scanning.py. Off by default so dev/CI never
+    # need a running clamd (uploads still get the structural validation
+    # in app/services/upload_validation.py either way: file signature,
+    # extension allow-list, a zip-bomb guard for XLSX — just not actual
+    # AV scanning). Set to True once a real clamd daemon is reachable at
+    # clamd_host:clamd_port.
     malware_scanning_enabled: bool = False
+    clamd_host: str = "localhost"
+    clamd_port: int = 3310
 
     # Auth / JWT
     jwt_secret: str = "CHANGE_ME_DEV_ONLY_INSECURE_SECRET"

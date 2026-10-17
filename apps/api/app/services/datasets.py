@@ -18,6 +18,11 @@ from app.models.dataset import (
     DatasetVersionStatus,
     Transformation,
 )
+from app.services.malware_scanning import (
+    MalwareDetectedError,
+    MalwareScanningUnavailableError,
+    get_malware_scanner,
+)
 from app.services.profiling import ParsingError, parse_upload, profile_table
 from app.services.storage import ObjectStorage
 from app.services.upload_validation import UploadValidationError, validate_upload
@@ -57,20 +62,23 @@ async def ingest_upload(
     content: bytes,
     user_id: str,
 ) -> tuple[DatasetVersion, str]:
-    """Validates and stores the raw upload, then persists it as a new
-    DatasetVersion with status=PROCESSING (creating the parent Dataset if
-    one wasn't passed in). Returns immediately once the file is safely
-    written — parsing and profiling (the expensive part for a large
-    file) are NOT done here anymore; the router schedules
-    finish_ingest_upload as a background task for that, so the HTTP
-    response doesn't wait on it. Raises DatasetServiceError only for a
-    structural validation failure (bad extension, size cap, a disguised
-    file) — those are still checked synchronously since they're cheap
-    and should reject the request outright, not leave a PROCESSING
-    version sitting around that's doomed to fail. A parsing failure
-    (corrupt CSV/XLSX content) is no longer raised here — it surfaces
-    later as DatasetVersionStatus.FAILED, since parsing itself is now
-    deferred.
+    """Validates, malware-scans (if enabled) and stores the raw upload,
+    then persists it as a new DatasetVersion with status=PROCESSING
+    (creating the parent Dataset if one wasn't passed in). Returns
+    immediately once the file is safely written — parsing and profiling
+    (the expensive part for a large file) are NOT done here anymore;
+    the router schedules finish_ingest_upload as a background task for
+    that, so the HTTP response doesn't wait on it. Raises
+    DatasetServiceError for a structural validation failure (bad
+    extension, size cap, a disguised file), MalwareDetectedError if a
+    scan (when enabled) finds a real signature match, or
+    MalwareScanningUnavailableError if scanning is enabled but clamd
+    couldn't be reached — all three are checked synchronously, before
+    anything is written to storage, since none of them should leave a
+    PROCESSING version sitting around that's doomed to fail (or, for
+    malware, ever touch storage at all). A parsing failure (corrupt
+    CSV/XLSX content) is no longer raised here — it surfaces later as
+    DatasetVersionStatus.FAILED, since parsing itself is now deferred.
 
     Returns (version, extension) — the extension is needed by the
     caller to schedule finish_ingest_upload, and re-deriving it from the
@@ -82,6 +90,10 @@ async def ingest_upload(
         validated = validate_upload(filename, content, settings.max_upload_size_bytes)
     except UploadValidationError as exc:
         raise DatasetServiceError(str(exc)) from exc
+
+    scanner = get_malware_scanner()
+    if scanner is not None:
+        scanner.scan(validated.content)  # raises MalwareDetectedError / MalwareScanningUnavailableError
 
     if dataset is None:
         dataset = Dataset(workspace_id=workspace_id, name=dataset_name, created_by_user_id=user_id)

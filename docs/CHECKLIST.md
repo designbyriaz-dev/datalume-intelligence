@@ -163,9 +163,9 @@ Legend: ✅ done & tested · 🚧 in progress · ⬜ not started
 - ✅ Async/background processing for large files — uploads no longer parse
   and profile synchronously in the request; see "Post-Phase-7: async
   upload processing (background task)" below.
-- ⬜ Real malware/AV scanning (`MALWARE_SCANNING_ENABLED` is a documented
-  no-op flag, not a scanner — see docs/SECURITY.md). Structural
-  validation (magic bytes, zip-bomb guard) is real; antivirus is not.
+- ✅ Real malware/AV scanning — `MALWARE_SCANNING_ENABLED` now wires up
+  a real ClamAV daemon rather than being a documented no-op; see
+  "Post-Phase-7: real malware/AV scanning" below.
 
 ## Phase 3 — AI and Reporting
 
@@ -3365,6 +3365,103 @@ new infrastructure, even though `redis_url` has sat unused in
   and the banner's conditional rendering logic was verified by its two
   stable end-states actually appearing correctly in the browser — only
   the specific mid-transition screenshot wasn't achieved.
+
+## Post-Phase-7: real malware/AV scanning
+
+The user picked this explicitly, over the other remaining self-contained
+technical gap (verifying the test suite against real Postgres), after
+everything else left in this document needed either their input
+(content/copy, VAT policy, live Stripe mode) or was a multi-day project
+already scoped out (SCIM, custom roles, deployment manifest). This one
+was picked as the higher-value gap: `MALWARE_SCANNING_ENABLED` has sat
+as a documented no-op since Phase 2 — uploads were structurally
+validated (magic bytes, zip-bomb guard) but never actually virus-
+scanned, a real security gap, not just a missing nicety.
+
+- ✅ **`app/services/malware_scanning.py`** (new): wraps a real ClamAV
+  daemon (`clamd`) over its network INSTREAM protocol, via the `clamd`
+  PyPI package (added to `requirements.txt`). `ClamdMalwareScanner.scan()`
+  streams the upload's raw bytes to clamd and raises
+  `MalwareDetectedError` (carrying the real signature name, e.g.
+  "Eicar-Test-Signature") on a match, or `MalwareScanningUnavailableError`
+  if clamd can't be reached, times out, or rejects the stream (e.g. it
+  exceeds clamd's own `StreamMaxLength`) — a fail-safe condition:
+  the upload is rejected rather than silently accepted unscanned.
+  `get_malware_scanner()` returns `None` when
+  `settings.malware_scanning_enabled` is `False` (the default, unchanged
+  — dev/CI never need a running clamd), or a real scanner when `True`.
+- ✅ **Wired into `ingest_upload`** (`app/services/datasets.py`),
+  synchronously, right after structural validation and before anything
+  is written to storage or the database — the same reasoning the
+  existing structural checks already use (a rejected upload shouldn't
+  leave a half-created `DatasetVersion` behind), extended to malware: an
+  infected file should never touch storage at all, not even briefly.
+  This runs before the request returns, unlike parsing/profiling (see
+  "Post-Phase-7: async upload processing" above) — a deliberate
+  distinction: scanning is a security gate that should block the
+  response, where parsing is a UX optimization that shouldn't.
+- ✅ **New router-level error handling**: `MalwareDetectedError` → 400
+  (the client's file, rejected), `MalwareScanningUnavailableError` → 503
+  (the server's problem) — same `Depends`-adjacent pattern this codebase
+  already uses for Stripe/LLM/Email "not configured" conditions, applied
+  here to "configured but unreachable."
+- ✅ **New settings**: `clamd_host` (default `localhost`) and
+  `clamd_port` (default `3310`) alongside the existing
+  `malware_scanning_enabled`, documented in `.env.example`.
+- ✅ **`infra/docker-compose.yml`**: added a `clamav` service
+  (`clamav/clamav:1.3`, the official image) alongside the existing
+  postgres/redis/minio services, wired to the `api` service's
+  `CLAMD_HOST`. Same opt-in pattern as minio/S3 — provisioned, but
+  `MALWARE_SCANNING_ENABLED` stays `false` in `.env.example` until
+  explicitly turned on. **Not run in this session** (no Docker in this
+  sandboxed environment) — unlike the Homebrew-based verification below,
+  this specific compose service is unverified; it's written against the
+  official image's documented healthcheck script
+  (`clamdcheck.sh`) but hasn't actually been booted.
+- ✅ Automated backend tests: 365/365 passing, 8 skipped (14 new).
+  `tests/test_malware_scanning.py` (10 tests, no real clamd needed —
+  mocks the `clamd` client at the protocol-response level): the
+  enabled/disabled gating, clean-scan passthrough, `FOUND` → 400 with
+  the real signature name in the error, every `MalwareScanningUnavailableError`
+  path (connection error, buffer-too-long, an unexpected status string),
+  and three router-level round trips through the real `/datasets`
+  endpoint (scanner unreachable → 503 with nothing persisted, scanner
+  reports infected → 400 with nothing persisted, scanner reports clean
+  → normal 201 success).
+- ✅ **`tests/test_malware_scanning_clamd.py`** (4 tests, real clamd
+  required — skips cleanly, not a failure, when none is reachable at
+  `127.0.0.1:3310`, same pattern as `test_s3_storage_minio.py` for
+  S3Storage): direct scanner calls against a real daemon with the real
+  EICAR test string (the antivirus industry's own standard harmless
+  "this is what a detection looks like" signature) and real clean
+  content, plus two full end-to-end API round trips — EICAR disguised
+  with a `.csv` extension (plain ASCII text, so it sails through every
+  *structural* check; only a real virus scan catches it) correctly
+  rejected with nothing persisted, and an ordinary clean CSV still
+  completing the full processing → ready pipeline with scanning turned
+  on.
+- ✅ **Verified against a real, locally-installed ClamAV**, not just
+  mocks: `brew install clamav`, ran a real `freshclam` (downloaded real
+  virus definitions — 3,287,027 main signatures, 355,765 daily, current
+  as of this session), and ran real `clamd --foreground` pointed at
+  them (confirmed via its own log: "Loaded 3628169 signatures"). Talked
+  to it directly with the `clamd` library first (`ping()` → `PONG`,
+  a clean buffer → `OK`, the real EICAR string → `FOUND`,
+  `Eicar-Test-Signature`) before trusting it in a test, then ran the
+  full `test_malware_scanning_clamd.py` suite against it — all 4
+  passed — and separately confirmed the module's `skipif` guard
+  actually skips (not fails) when pointed at an unreachable port,
+  proving CI (which has no clamd) is unaffected by this new file.
+- ✅ **`docs/SECURITY.md` corrected**, not just the one line this round
+  touched: its "Not yet implemented" list had gone stale well before
+  this round (claiming no email verification, no MFA, no password
+  reset, no rate limiting, no audit logging — all long since built, per
+  this document's own Post-Phase-7 sections). Cross-checked each claim
+  against what the code actually does (which routers call
+  `record_audit_event` and with which event types, specifically) before
+  rewriting, rather than assuming. Also fixed a stale GDPR-section
+  framing that still described the dataset upload pipeline and AI
+  analyst as not yet built.
 
 ## Known limitations in what's built
 

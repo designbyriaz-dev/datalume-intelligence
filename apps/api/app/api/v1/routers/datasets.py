@@ -47,6 +47,7 @@ from app.services.datasets import (
     get_table_for_version,
     ingest_upload,
 )
+from app.services.malware_scanning import MalwareDetectedError, MalwareScanningUnavailableError
 from app.services.storage import ObjectStorage
 from app.services.version_compare import compare_tables
 from app.services.webhooks import dispatch_event
@@ -105,6 +106,10 @@ async def upload_dataset(
         )
     except DatasetServiceError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except MalwareDetectedError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except MalwareScanningUnavailableError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
     # The file is safely stored and the version row exists (status
     # PROCESSING) by this point — parsing and profiling (the expensive
