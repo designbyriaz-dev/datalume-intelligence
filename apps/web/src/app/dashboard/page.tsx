@@ -12,13 +12,12 @@ import { daysUntil, resetCountdownLabel } from "@/lib/format";
 // entry for these) — kept as a plain dropdown behind "Something else",
 // same free-form choice the old single-step form always offered,
 // rather than inventing KPI packs for domains the backend doesn't
-// actually support yet (see docs/CHECKLIST.md's public-sector/education
-// scope note). public_sector moved out of this list once it got a real
-// pack — it now shows as its own card above, populated dynamically from
-// the real backend registry, like every other dedicated pack.
+// actually support yet. public_sector and education moved out of this
+// list once they got real packs — each now shows as its own card
+// above, populated dynamically from the real backend registry, like
+// every other dedicated pack.
 const OTHER_INDUSTRIES = [
   { value: "general", label: "General Data Analysis" },
-  { value: "education", label: "Education" },
   { value: "operations_logistics", label: "Operations & Logistics" },
   { value: "other", label: "Other" },
 ];
@@ -99,7 +98,7 @@ function CreateWorkspace({
               >
                 <div className="font-medium">Something else</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  General data analysis, education, operations &amp; logistics, or anything else.
+                  General data analysis, operations &amp; logistics, or anything else.
                 </div>
               </button>
             </>

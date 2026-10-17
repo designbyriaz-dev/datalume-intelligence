@@ -8,6 +8,7 @@ const SOLUTIONS = [
   { name: "Social Housing", blurb: "Stock condition, compliance exceptions and investment planning." },
   { name: "Business & Finance", blurb: "Revenue, expenses and profitability trends, explained plainly." },
   { name: "Public Sector Budgets", blurb: "Budget vs. actual spend, forecast outturn and variance by service area." },
+  { name: "Pupil Attendance", blurb: "Attendance rate, persistent absence, and the Pupil Premium attendance gap." },
 ];
 
 export default function HomePage() {

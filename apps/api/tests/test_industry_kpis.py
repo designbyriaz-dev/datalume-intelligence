@@ -2,7 +2,7 @@ import datetime as dt
 
 import polars as pl
 
-from app.core.industry_packs import BUSINESS_FINANCE, COMMERCIAL_PROPERTY, PUBLIC_SECTOR, SOCIAL_HOUSING
+from app.core.industry_packs import BUSINESS_FINANCE, COMMERCIAL_PROPERTY, EDUCATION, PUBLIC_SECTOR, SOCIAL_HOUSING
 from app.services.industry_kpis import compute_kpis
 from app.services.industry_matching import missing_required_fields, resolve_field_mapping
 
@@ -191,6 +191,113 @@ def test_public_sector_variance_kpis_handle_no_overspending_areas():
     assert results["over_budget_line_count"].value == 0
     assert results["top5_overspend_concentration"].error is not None
     assert "overspend" in results["top5_overspend_concentration"].error.lower()
+
+
+def test_education_field_mapping_resolves_messy_headers():
+    df = pl.DataFrame(
+        {
+            "Pupil ID": ["S1"],
+            "Possible Sessions": [50],
+            "Attended Sessions": [50],
+            "Year": ["Year 7"],
+            "FSM": ["Yes"],
+            "Grade": [65],
+        }
+    )
+    mapping = resolve_field_mapping(EDUCATION, df.columns)
+    assert mapping["student_id"] == "Pupil ID"
+    assert mapping["sessions_possible"] == "Possible Sessions"
+    assert mapping["sessions_attended"] == "Attended Sessions"
+    assert mapping["year_group"] == "Year"
+    assert mapping["pupil_premium"] == "FSM"
+    assert mapping["attainment_score"] == "Grade"
+    assert missing_required_fields(EDUCATION, mapping) == []
+
+
+def test_education_kpis_are_numerically_correct():
+    # S1 is split across two rows (e.g. two terms) specifically to prove
+    # per-student aggregation sums across rows rather than treating each
+    # row as a separate student. Session totals deliberately vary a lot
+    # per student (50 to 200) so overall_attendance_rate (session-
+    # weighted) and average_attendance_per_student (student-weighted)
+    # are genuinely different numbers, not coincidentally equal.
+    df = pl.DataFrame(
+        {
+            "Student ID": ["S1", "S1", "S2", "S3", "S4", "S5"],
+            "Sessions Possible": [50, 50, 50, 200, 100, 150],
+            "Sessions Attended": [50, 40, 40, 190, 99, 75],
+            "Pupil Premium": ["Yes", "Yes", "Yes", "No", "No", "No"],
+            "Attainment Score": [65, 70, 55, 80, 90, 45],
+        }
+    )
+    mapping = resolve_field_mapping(EDUCATION, df.columns)
+    assert missing_required_fields(EDUCATION, mapping) == []
+
+    results = {r.kpi_id: r for r in compute_kpis(df, EDUCATION, mapping)}
+
+    assert results["total_students"].value == 5
+    # S1: 90/100=90%, S2: 40/50=80%, S3: 190/200=95%, S4: 99/100=99%,
+    # S5: 75/150=50%.
+    assert round(results["overall_attendance_rate"].value, 2) == 82.33
+    assert round(results["average_attendance_per_student"].value, 2) == 82.8
+    # S2 (80%) and S5 (50%) are below 90% -> 2 of 5 students = 40%. S1 at
+    # exactly 90% is NOT persistently absent (threshold is "below 90").
+    assert round(results["persistent_absence_rate"].value, 2) == 40.0
+    # PP students S1 (90%) and S2 (80%) average 85%; non-PP S3/S4/S5
+    # (95%, 99%, 50%) average 81.33% -> gap = +3.67.
+    assert round(results["pupil_premium_attendance_gap"].value, 2) == 3.67
+    assert round(results["average_attainment_score"].value, 2) == 67.5
+    assert all(r.error is None for r in results.values())
+
+    assert EDUCATION.compliance_caveat is not None
+    assert "indicative only" in EDUCATION.compliance_caveat
+
+
+def test_education_persistent_absence_boundary_is_strictly_below_90():
+    """A student at exactly 90% attendance must NOT count as
+    persistently absent — the DfE's definition is 'below 90%', not
+    'at or below'."""
+    df = pl.DataFrame(
+        {
+            "Student ID": ["S1"],
+            "Sessions Possible": [100],
+            "Sessions Attended": [90],
+            "Pupil Premium": ["No"],
+        }
+    )
+    mapping = resolve_field_mapping(EDUCATION, df.columns)
+    results = {r.kpi_id: r for r in compute_kpis(df, EDUCATION, mapping)}
+    assert results["persistent_absence_rate"].value == 0.0
+
+
+def test_education_kpi_reports_error_for_unmapped_field():
+    df = pl.DataFrame({"Student ID": ["S1", "S2"], "Sessions Possible": [100, 100]})
+    mapping = resolve_field_mapping(EDUCATION, df.columns)
+    assert missing_required_fields(EDUCATION, mapping) != []
+
+    results = {r.kpi_id: r for r in compute_kpis(df, EDUCATION, mapping)}
+    assert results["overall_attendance_rate"].error is not None
+    assert "sessions_attended" in results["overall_attendance_rate"].error
+    # total_students's only required field (student_id) WAS mapped, so
+    # it should still compute even though other fields are missing.
+    assert results["total_students"].value == 2
+
+
+def test_education_pupil_premium_gap_handles_no_pp_students():
+    """Nobody is Pupil Premium — the gap KPI should error clearly
+    rather than divide by zero."""
+    df = pl.DataFrame(
+        {
+            "Student ID": ["S1", "S2"],
+            "Sessions Possible": [100, 100],
+            "Sessions Attended": [90, 80],
+            "Pupil Premium": ["No", "No"],
+        }
+    )
+    mapping = resolve_field_mapping(EDUCATION, df.columns)
+    results = {r.kpi_id: r for r in compute_kpis(df, EDUCATION, mapping)}
+    assert results["pupil_premium_attendance_gap"].error is not None
+    assert "Pupil Premium" in results["pupil_premium_attendance_gap"].error
 
 
 def test_matching_does_not_false_positive_on_unrelated_words():

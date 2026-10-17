@@ -31,6 +31,7 @@ const INDUSTRY_PACK_IDS = new Set([
   "social_housing",
   "business_finance",
   "public_sector",
+  "education",
 ]);
 
 // Industries whose KPIs/reports actually use the configurable date window

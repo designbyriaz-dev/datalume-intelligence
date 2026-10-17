@@ -55,6 +55,7 @@ async def test_list_industry_packs(client: AsyncClient) -> None:
         "social_housing",
         "business_finance",
         "public_sector",
+        "education",
     }
 
     commercial = next(p for p in resp.json() if p["industry_id"] == "commercial_property")

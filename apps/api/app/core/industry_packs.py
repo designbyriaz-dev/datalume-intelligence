@@ -6,14 +6,17 @@ app/services/tools.py).
 
 Scope: the four packs named in the brief's Phase 5 deliverable list —
 commercial property, residential property, business finance, and social
-housing — plus a fifth, public_sector, added in a later Post-Phase-7
-round once the user supplied the real domain input this module
-previously said it was waiting on (see docs/CHECKLIST.md's
-"Post-Phase-7: public sector industry pack" section): UK local
-authority revenue budget monitoring specifically (service area, annual
-budget vs. actual spend vs. forecast outturn), not public sector in
-general. Education/health (also named in the brief's section 9) is
-still not built.
+housing — plus two more added in later Post-Phase-7 rounds once the
+user supplied the real domain input this module previously said it was
+waiting on (see docs/CHECKLIST.md's "Post-Phase-7: public sector
+industry pack" and "Post-Phase-7: education industry pack" sections):
+public_sector (UK local authority revenue budget monitoring
+specifically — service area, annual budget vs. actual spend vs.
+forecast outturn, not public sector in general) and education (UK
+school pupil attendance & performance specifically — session-level
+attendance, persistent absence, Pupil Premium attendance gap, not
+every education use case). Health (also named in the brief's section
+9) is still not built.
 
 KPI counts here are a representative subset of each pack's brief
 section, not an exhaustive implementation of every metric mentioned —
@@ -429,9 +432,114 @@ PUBLIC_SECTOR = IndustryPack(
     ),
 )
 
+EDUCATION = IndustryPack(
+    industry_id="education",
+    name="Pupil Attendance & Performance Intelligence",
+    column_aliases=(
+        ColumnAlias(
+            "student_id",
+            "Student / pupil identifier",
+            ("student id", "pupil id", "upn", "student", "pupil"),
+            True,
+        ),
+        ColumnAlias(
+            "sessions_possible",
+            "Number of attendance sessions possible for this record",
+            ("sessions possible", "possible sessions", "total sessions"),
+            True,
+        ),
+        ColumnAlias(
+            "sessions_attended",
+            "Number of attendance sessions actually attended",
+            ("sessions attended", "attended sessions", "sessions present"),
+            True,
+        ),
+        ColumnAlias("year_group", "Year group / key stage", ("year group", "year", "key stage"), False),
+        ColumnAlias(
+            "pupil_premium",
+            "Whether the student is eligible for Pupil Premium funding",
+            ("pupil premium", "pp", "fsm", "free school meals"),
+            False,
+        ),
+        ColumnAlias(
+            "attainment_score",
+            "A numeric attainment score, grade, or mark",
+            ("attainment score", "grade", "mark", "score", "attainment"),
+            False,
+        ),
+    ),
+    kpis=(
+        KPIDefinition("total_students", "Total Students", "Count of distinct students in the dataset", "count", ("student_id",)),
+        KPIDefinition(
+            "overall_attendance_rate",
+            "Overall Attendance Rate",
+            "Sessions attended divided by sessions possible, across all records (session-weighted)",
+            "percentage",
+            ("sessions_attended", "sessions_possible"),
+        ),
+        KPIDefinition(
+            "average_attendance_per_student",
+            "Average Attendance per Student",
+            "Mean of each student's own attendance rate (student-weighted, not session-weighted)",
+            "percentage",
+            ("student_id", "sessions_attended", "sessions_possible"),
+        ),
+        KPIDefinition(
+            "persistent_absence_rate",
+            "Persistent Absence Rate",
+            "Share of students whose attendance is below 90% — the DfE's own official "
+            "'persistently absent' threshold",
+            "percentage",
+            ("student_id", "sessions_attended", "sessions_possible"),
+        ),
+        KPIDefinition(
+            "pupil_premium_attendance_gap",
+            "Pupil Premium Attendance Gap",
+            "Average attendance of Pupil Premium students minus average attendance of everyone "
+            "else — can be negative",
+            "percentage",
+            ("student_id", "pupil_premium", "sessions_attended", "sessions_possible"),
+        ),
+        KPIDefinition(
+            "average_attainment_score",
+            "Average Attainment Score",
+            "Mean of the mapped attainment score/grade column — not a pass rate, since grading "
+            "scales (GCSE, A-Level, vocational) vary too much to assume a universal pass threshold",
+            "number",
+            ("attainment_score",),
+        ),
+    ),
+    suggested_questions=(
+        "What's our overall attendance rate?",
+        "How many students are persistently absent?",
+        "Is there an attendance gap between Pupil Premium and other students?",
+        "What's our average attainment score?",
+    ),
+    terminology={
+        "Persistent Absence": "The DfE's official term for a pupil who misses 10% or more of possible sessions (i.e. under 90% attendance).",
+        "Pupil Premium": "Additional UK government funding for disadvantaged pupils (e.g. those eligible for free school meals or looked-after children).",
+        "Key Stage": "The UK national curriculum's age-based stage groupings (KS1 through KS5).",
+        "Session": "Attendance is recorded per half-day session (AM/PM) — the DfE's standard reporting unit.",
+        "UPN": "Unique Pupil Number — a pupil's unique identifier that follows them across UK schooling.",
+    },
+    report_templates=(),
+    compliance_caveat=(
+        "Attendance and attainment figures are calculated from the data you uploaded and are "
+        "indicative only — confirm against your school's official MIS (management information "
+        "system) and DfE reporting guidance before using for statutory returns or Ofsted reporting."
+    ),
+)
+
 INDUSTRY_PACKS: dict[str, IndustryPack] = {
     p.industry_id: p
-    for p in (COMMERCIAL_PROPERTY, RESIDENTIAL_PROPERTY, SOCIAL_HOUSING, BUSINESS_FINANCE, PUBLIC_SECTOR)
+    for p in (
+        COMMERCIAL_PROPERTY,
+        RESIDENTIAL_PROPERTY,
+        SOCIAL_HOUSING,
+        BUSINESS_FINANCE,
+        PUBLIC_SECTOR,
+        EDUCATION,
+    )
 }
 
 

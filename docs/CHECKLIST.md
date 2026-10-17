@@ -464,8 +464,11 @@ sector industry pack" below); education/health is still not started.
   table are still not built (see that section's own remaining gaps).
 - ✅⚠️ Public sector pack — built (UK local authority budget monitoring
   specifically, not public sector in general), see "Post-Phase-7:
-  public sector industry pack" below. Education/health is still not
-  started.
+  public sector industry pack" below.
+- ✅⚠️ Education pack — built (UK school pupil attendance & performance
+  specifically, not education in general), see "Post-Phase-7: education
+  industry pack" below. Health (also named in the brief's section 9) is
+  still not started.
 - ✅ Column matching is still a heuristic (word-token overlap), not a
   certified parser — ambiguous short aliases (e.g. "status") can still
   mismatch on unusual real-world data. But a user can now review and
@@ -3759,6 +3762,108 @@ waiting on.
   +£20,000) independently hand-computed beforehand, not copied from the
   AI's own output.
 
+## Post-Phase-7: education industry pack
+
+The other option from the fork at the end of the public sector round
+(the user picked real AWS S3/R2 credentials first, but hadn't supplied
+them yet when prompted to continue — rather than stall waiting, picked
+up this sibling option instead, which was ready to proceed on). Same
+process as public sector: scoped down from "education" in general (an
+even more varied space than public sector — schools, FE colleges,
+universities each track completely different things) to one concrete
+use case the user picked explicitly, **UK school pupil attendance &
+performance**, with a draft pack shown and approved before any code
+was written.
+
+- ✅ **`EDUCATION` industry pack** (`app/core/industry_packs.py`,
+  `industry_id="education"` — already a valid `Workspace.industry`
+  value since Phase 1): 6 column aliases (`student_id`,
+  `sessions_possible`, `sessions_attended` required;
+  `year_group`/`pupil_premium`/`attainment_score` optional), 6 KPIs, 4
+  suggested AI questions, a 5-term glossary, and a compliance caveat
+  pointing at the school's own MIS and DfE guidance. No report template
+  yet, same as public_sector's first round.
+- ✅ **6 KPI calculators** (`app/services/industry_kpis.py`), the most
+  structurally novel of any pack so far: `total_students` (distinct
+  count, not row count); `overall_attendance_rate` (session-weighted —
+  sum attended ÷ sum possible across every row); a new
+  `_per_student_attendance` helper (groups by student first, summing
+  each student's own sessions across however many rows they have —
+  attendance can be split across terms) powering three KPIs that read
+  this same grouped data differently: `average_attendance_per_student`
+  (student-weighted — deliberately different from #2, proven different
+  by a fixture where session counts vary 4x between students so the two
+  numbers can't coincidentally match), `persistent_absence_rate` (%
+  of students below 90% — the DfE's own official "persistently absent"
+  threshold, not an invented one; a dedicated test proves a student at
+  *exactly* 90% does NOT count, since the real definition is "below"),
+  and `pupil_premium_attendance_gap` (mean PP attendance minus mean
+  non-PP attendance, grouping students by a first-seen Pupil Premium
+  flag per student — can be negative, handled). A new `_is_truthy_flag`
+  helper reads Pupil Premium markers across however a real spreadsheet
+  might encode them (`Yes`/`Y`/`True`/`1`/boolean). All 6 registered —
+  covered by the existing cross-pack regression test with zero changes
+  needed.
+- ✅ **Frontend**: `education` removed from `OTHER_INDUSTRIES`'
+  free-form fallback dropdown (now redundant with its own card, same as
+  public_sector before it) and from `INDUSTRY_PACK_IDS` in
+  `workspaces/[id]/page.tsx` — added to the *correct* set this time on
+  the first attempt (the public_sector round's gap was found and fixed
+  live; this round applied that lesson immediately rather than
+  repeating the miss). Deliberately *not* added to
+  `INDUSTRIES_WITH_KPI_WINDOW` — this pack has no date-window KPI like
+  "leases expiring" or "overdue inspection", so that setting would be a
+  no-op for it, same reasoning already documented for `business_finance`
+  and `public_sector`.
+- ✅ **Marketing pages updated again**: `solutions` gained a sixth pack
+  card and "Five industries" → "Six industries"; `faq`'s "what if my
+  industry isn't..." question extended; the landing page's `SOLUTIONS`
+  list gained an entry; the dashboard's "Something else" fallback copy
+  and the `solutions` page's matching copy both had their last
+  remaining stale "education" mention removed (the test exercising that
+  fallback dropdown was also updated, to `operations_logistics` — the
+  only fallback category now left with real behavior to test).
+- ✅ Automated backend tests: 386/386 passing (5 new, in
+  `tests/test_industry_kpis.py`): field-mapping resolution, all 6 KPIs
+  hand-verified against an independently computed fixture (a student
+  split across two rows specifically to prove per-student aggregation
+  sums across rows rather than miscounting them as separate students),
+  the exactly-90%-is-not-persistently-absent boundary case, the
+  missing-field error path, and a no-Pupil-Premium-students edge case
+  (the gap KPI errors cleanly rather than dividing by zero).
+  `test_industry_api.py`'s pack-count assertion extended to include
+  `education`.
+- ✅ Frontend: 66/66 passing (the fallback-dropdown test's example value
+  changed from the now-also-removed `education` to
+  `operations_logistics`). `npx tsc --noEmit` and `npm run build` both
+  clean.
+- ✅⚠️ **Verified live against the real running server with a real
+  uploaded dataset — numbers hand-verified independently**: uploaded a
+  real 6-row attendance CSV (5 students, one split across two rows) and
+  confirmed all 6 KPIs displayed in the browser exactly matched
+  hand-calculated values (Overall Attendance Rate 82.3% vs. Average
+  Attendance per Student 82.8% — genuinely different numbers, proving
+  the session-weighted/student-weighted distinction is real, not just
+  defined). Then asked the real AI analyst the pack's own suggested
+  question about the Pupil Premium attendance gap — and this time its
+  answer did **not** match the dedicated KPI: the AI analyst has no
+  access to a `compute_industry_kpis`-equivalent tool (confirmed by
+  reading `app/services/tools.py` — its toolset is `descriptive_stats`,
+  `frequency_table`, `correlation`, `detect_outliers`,
+  `group_aggregate`, `time_trend`, `simple_forecast`, nothing
+  pack-specific), so it grouped the *raw rows* by Pupil Premium status
+  directly rather than aggregating per student first — miscounting the
+  split student as inflating one group's row count, and arriving at an
+  86.7%-vs-80.9% comparison instead of the dedicated KPI's correct
+  85%-vs-81.33% (a +3.67 gap). This is a genuine, pre-existing
+  architectural characteristic (true for every pack, not introduced by
+  this one) rather than a bug this round caused — recorded honestly
+  instead of claiming a match that didn't happen. A real improvement
+  this surfaces for later: giving the AI analyst a tool to call a
+  pack's own precise KPI calculators directly, rather than only generic
+  statistics tools, for questions a dedicated KPI already answers more
+  rigorously.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -3879,10 +3984,10 @@ waiting on.
     Planning, Executive Intelligence, etc. — the pattern is now proven
     six times; each remaining one is a template-writing task on top of
     the existing KPI engine, attached to an existing pack as a second
-    (or third) report, or to a new pack — public_sector now has real
-    domain input and KPIs (see "Post-Phase-7: public sector industry
-    pack" above) but no report template yet; education still has
-    neither.
+    (or third) report, or to a new pack — public_sector and education
+    both now have real domain input and KPIs (see "Post-Phase-7: public
+    sector industry pack" and "Post-Phase-7: education industry pack"
+    above) but neither has a report template yet.
 13. ~~A schema-confirmation UI for industry field mappings~~ — done, see
     "Post-Phase-7: industry field mapping confirmation" above.
 14. ~~Set `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`/`OIDC_DISCOVERY_URL` against

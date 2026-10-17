@@ -312,6 +312,113 @@ def _calc_top5_overspend_concentration(df, mapping, **_kwargs) -> float:
     return round(top5_overspend / total_overspend * 100, 2)
 
 
+_PP_TRUE_MARKERS = ("y", "yes", "true", "pp", "1", "eligible")
+
+
+def _is_truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in _PP_TRUE_MARKERS
+
+
+def _per_student_attendance(df: pl.DataFrame, mapping: dict[str, str | None]) -> dict[str, float]:
+    """{student_id: attendance_rate_pct} — sessions attended divided by
+    sessions possible, summed per student across however many rows they
+    have (a student's attendance may be split across multiple rows,
+    e.g. one per term)."""
+    student_col = mapping.get("student_id")
+    possible_col = mapping.get("sessions_possible")
+    attended_col = mapping.get("sessions_attended")
+    if student_col is None or possible_col is None or attended_col is None:
+        raise KPIError(
+            "Required fields 'student_id', 'sessions_possible' and 'sessions_attended' must all be mapped."
+        )
+    sub = df.select([student_col, possible_col, attended_col]).drop_nulls()
+    grouped = sub.group_by(student_col).agg(
+        [pl.col(attended_col).sum().alias("attended"), pl.col(possible_col).sum().alias("possible")]
+    )
+    rates: dict[str, float] = {}
+    for row in grouped.to_dicts():
+        possible = row["possible"]
+        if possible and possible > 0:
+            rates[str(row[student_col])] = row["attended"] / possible * 100
+    return rates
+
+
+def _calc_total_students(df, mapping, **_kwargs) -> int:
+    col = mapping.get("student_id")
+    if col is None:
+        raise KPIError("Required field 'student_id' is not mapped to a column.")
+    return int(df[col].drop_nulls().n_unique())
+
+
+def _calc_overall_attendance_rate(df, mapping, **_kwargs) -> float:
+    possible = float(_resolve_numeric_series(df, mapping, "sessions_possible").sum())
+    if possible <= 0:
+        raise KPIError("Total sessions possible is zero — cannot compute attendance rate.")
+    attended = float(_resolve_numeric_series(df, mapping, "sessions_attended").sum())
+    return round(attended / possible * 100, 2)
+
+
+def _calc_average_attendance_per_student(df, mapping, **_kwargs) -> float:
+    rates = _per_student_attendance(df, mapping)
+    if not rates:
+        raise KPIError("No students with valid session data to average.")
+    return round(sum(rates.values()) / len(rates), 2)
+
+
+def _calc_persistent_absence_rate(df, mapping, **_kwargs) -> float:
+    rates = _per_student_attendance(df, mapping)
+    if not rates:
+        raise KPIError("No students with valid session data to evaluate.")
+    persistently_absent = sum(1 for r in rates.values() if r < 90)
+    return round(persistently_absent / len(rates) * 100, 2)
+
+
+def _calc_pupil_premium_attendance_gap(df, mapping, **_kwargs) -> float:
+    student_col = mapping.get("student_id")
+    pp_col = mapping.get("pupil_premium")
+    possible_col = mapping.get("sessions_possible")
+    attended_col = mapping.get("sessions_attended")
+    if student_col is None or pp_col is None or possible_col is None or attended_col is None:
+        raise KPIError(
+            "Required fields 'student_id', 'pupil_premium', 'sessions_possible' and "
+            "'sessions_attended' must all be mapped."
+        )
+    sub = df.select([student_col, pp_col, possible_col, attended_col]).drop_nulls()
+    grouped = sub.group_by(student_col).agg(
+        [
+            pl.col(pp_col).first().alias("pp"),
+            pl.col(attended_col).sum().alias("attended"),
+            pl.col(possible_col).sum().alias("possible"),
+        ]
+    )
+
+    pp_rates: list[float] = []
+    other_rates: list[float] = []
+    for row in grouped.to_dicts():
+        possible = row["possible"]
+        if not possible or possible <= 0:
+            continue
+        rate = row["attended"] / possible * 100
+        (pp_rates if _is_truthy_flag(row["pp"]) else other_rates).append(rate)
+
+    if not pp_rates:
+        raise KPIError("No Pupil Premium students identified in the data.")
+    if not other_rates:
+        raise KPIError("No non-Pupil Premium students identified in the data.")
+    return round(sum(pp_rates) / len(pp_rates) - sum(other_rates) / len(other_rates), 2)
+
+
+def _calc_average_attainment_score(df, mapping, **_kwargs) -> float:
+    series = _resolve_numeric_series(df, mapping, "attainment_score")
+    if len(series) == 0:
+        raise KPIError("No attainment score values present.")
+    return round(float(series.mean()), 2)
+
+
 _CALCULATORS = {
     "total_rent_roll": _calc_total_rent_roll,
     "average_rent": _calc_average_rent,
@@ -341,6 +448,12 @@ _CALCULATORS = {
     "budget_utilisation_rate": _calc_budget_utilisation_rate,
     "over_budget_line_count": _calc_over_budget_line_count,
     "top5_overspend_concentration": _calc_top5_overspend_concentration,
+    "total_students": _calc_total_students,
+    "overall_attendance_rate": _calc_overall_attendance_rate,
+    "average_attendance_per_student": _calc_average_attendance_per_student,
+    "persistent_absence_rate": _calc_persistent_absence_rate,
+    "pupil_premium_attendance_gap": _calc_pupil_premium_attendance_gap,
+    "average_attainment_score": _calc_average_attainment_score,
 }
 
 

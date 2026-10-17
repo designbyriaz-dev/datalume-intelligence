@@ -123,14 +123,15 @@ describe("the guided workspace-creation flow", () => {
   });
 
   it("'Something else' shows the free-form industry dropdown and submits its value", async () => {
-    // public_sector moved out of this fallback dropdown once it got its
-    // own dedicated pack card (see OTHER_INDUSTRIES's comment) — uses
-    // "education" instead, still a plain fallback option, to keep
-    // testing the same free-form-dropdown behavior.
+    // public_sector and education both moved out of this fallback
+    // dropdown once they got their own dedicated pack cards (see
+    // OTHER_INDUSTRIES's comment) — uses "operations_logistics"
+    // instead, still a plain fallback option, to keep testing the same
+    // free-form-dropdown behavior.
     mockApi.createWorkspace.mockResolvedValue({
       id: "ws2",
       name: "General Thing",
-      industry: "education",
+      industry: "operations_logistics",
       owner_user_id: "u1",
       organization_id: null,
       kpi_window_months: null,
@@ -142,11 +143,16 @@ describe("the guided workspace-creation flow", () => {
     expect(screen.getByLabelText("Industry")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Workspace name"), "General Thing");
-    await user.selectOptions(screen.getByLabelText("Industry"), "education");
+    await user.selectOptions(screen.getByLabelText("Industry"), "operations_logistics");
     await user.click(screen.getByRole("button", { name: "Create workspace" }));
 
     await waitFor(() =>
-      expect(mockApi.createWorkspace).toHaveBeenCalledWith("tok1", "General Thing", "education", undefined)
+      expect(mockApi.createWorkspace).toHaveBeenCalledWith(
+        "tok1",
+        "General Thing",
+        "operations_logistics",
+        undefined
+      )
     );
   });
 

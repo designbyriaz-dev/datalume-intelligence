@@ -91,6 +91,22 @@ const PACKS: Pack[] = [
     ],
     reports: [],
   },
+  {
+    name: "Pupil Attendance & Performance",
+    summary: "UK school attendance and attainment tracking — session-level attendance, persistent absence, and the Pupil Premium attendance gap.",
+    kpis: [
+      "Overall attendance rate & average attendance per student",
+      "Persistent absence rate (DfE's below-90% definition)",
+      "Pupil Premium attendance gap",
+      "Average attainment score",
+    ],
+    questions: [
+      "What's our overall attendance rate?",
+      "How many students are persistently absent?",
+      "Is there an attendance gap between Pupil Premium and other students?",
+    ],
+    reports: [],
+  },
 ];
 
 export default function SolutionsPage() {
@@ -101,7 +117,7 @@ export default function SolutionsPage() {
       <section className="mx-auto max-w-4xl px-6 py-20 text-center">
         <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">Built for how your industry works</h1>
         <p className="mt-4 text-lg text-slate-600 dark:text-slate-400">
-          Five industries get a dedicated KPI engine, automatic field mapping, and purpose-built
+          Six industries get a dedicated KPI engine, automatic field mapping, and purpose-built
           reports out of the box. Every other industry still gets full data profiling and all seven
           analytics tools — just not a fixed KPI set invented for a domain DataLume doesn't model yet.
         </p>
@@ -147,7 +163,7 @@ export default function SolutionsPage() {
       <section className="mx-auto max-w-3xl px-6 pb-20 text-center">
         <h2 className="text-xl font-semibold">Not one of these?</h2>
         <p className="mt-2 text-slate-600 dark:text-slate-400">
-          General data analysis, education, operations &amp; logistics, or anything else — pick
+          General data analysis, operations &amp; logistics, or anything else — pick
           &ldquo;Something else&rdquo; when you create a workspace. You'll get the same upload,
           cleaning, AI analyst, and dashboard tools, without a dedicated KPI pack.
         </p>
