@@ -3858,11 +3858,10 @@ was written.
   85%-vs-81.33% (a +3.67 gap). This is a genuine, pre-existing
   architectural characteristic (true for every pack, not introduced by
   this one) rather than a bug this round caused — recorded honestly
-  instead of claiming a match that didn't happen. A real improvement
+  instead of claiming a match that didn't happen. ~~A real improvement
   this surfaces for later: giving the AI analyst a tool to call a
-  pack's own precise KPI calculators directly, rather than only generic
-  statistics tools, for questions a dedicated KPI already answers more
-  rigorously.
+  pack's own precise KPI calculators directly~~ — done, see
+  "Post-Phase-7: AI analyst industry KPI tool" below.
 
 ## Post-Phase-7: dashboard email-verification banner
 
@@ -3902,6 +3901,93 @@ link.
   end-to-end (a real email landing in a real inbox) earlier in this
   project, so a second manual inbox check for this specific UI addition
   wasn't necessary.
+
+## Post-Phase-7: AI analyst industry KPI tool
+
+Self-directed, not asked for: after the checklist's self-contained
+items ran out again (AWS S3/R2 credentials still not supplied, the only
+other open items needing the user's content or a scoping decision), the
+education pack round's own honestly-recorded finding — the AI analyst
+gave a *wrong* answer to its own suggested question because it had no
+way to call a pack's precise KPI calculator, only generic statistics
+tools — was picked up as a concrete, well-justified, fully
+self-contained fix.
+
+- ✅ **`compute_industry_kpis`, a tool assembled per-conversation, not
+  drawn from the static registry** (`app/services/ai/planner.py`): every
+  other tool in `app/services/tools.py` is a pure function of the
+  dataframe alone; this one needs the workspace's own `IndustryPack` and
+  resolved field mapping too, which that generic, stateless registry has
+  no way to carry. Built fresh for each turn by `run_conversation_turn`
+  (new optional parameters: `industry_pack`, `field_mapping`,
+  `kpi_window_months` — all `None` by default, so every existing call
+  site and test is unaffected) and dispatched specially in the tool loop
+  rather than through `TOOLS.get()`. Takes no parameters — always
+  computes and returns every KPI in the pack, reusing the exact same
+  `compute_kpis` engine the dedicated `/industry-kpis` REST endpoint and
+  dashboard widget already use, so there is only one KPI implementation
+  in the whole app, not a second one for the AI to drift out of sync
+  with.
+- ✅ **`app/api/v1/routers/ai_analyst.py`** resolves the workspace's
+  `IndustryPack` and effective field mapping (same
+  `get_effective_field_mapping` call the REST endpoint uses — honors a
+  user-confirmed mapping over the automatic guess) and passes them into
+  the planner. `None` for a workspace with no industry pack (general/
+  other) — the AI analyst still works exactly as before there, just
+  without this one extra tool, the same gating every other
+  industry-specific feature in this app already uses.
+- ✅ **System prompt updated conditionally**: when a pack is available,
+  a 6th rule tells the model to prefer this tool over
+  `group_aggregate`/`descriptive_stats` for questions matching one of
+  the pack's named KPIs, and names the pack and its KPI list explicitly
+  so the model knows what's available without having to discover it by
+  trial and error.
+- 🐛 **Found and fixed a second real gap while verifying this fix live
+  against the real Anthropic API** (not a scripted fake): the tool
+  call itself was correct and returned the exact right number (a 3.67%
+  Pupil Premium attendance gap), but the model's prose got the
+  *direction* backwards ("Pupil Premium students attending at a lower
+  rate" — wrong; positive means higher). Root cause found precisely:
+  `KPIResult` (what `compute_kpis` actually returns) carries no
+  `description` field at all — every other consumer of a KPI
+  (`GET /industry-packs`, the dashboard widget) gets the definition from
+  the separate `IndustryPack.kpis` list instead, which the model never
+  sees; it had only a bare name and a signed number to interpret
+  blind. Fixed by merging each KPI's `description` (looked up from the
+  pack definition by `kpi_id`) into the tool result, scoped narrowly to
+  this one tool's serialization rather than changing `KPIResult` itself
+  (every other call site's shape stays exactly as it was). Also
+  tightened `pupil_premium_attendance_gap`'s own description text to
+  state the sign convention explicitly ("positive means ... MORE;
+  negative means ... LESS") rather than leaving it implicit. Re-ran the
+  exact same real API call after the fix and confirmed the model's
+  prose was now correct — a genuine before/after fix, not just a
+  plausible-sounding patch.
+- ✅ Automated backend tests: 393/393 passing (7 new — 5 in
+  `tests/test_ai_planner.py`: the tool is offered only when a pack is
+  given, the system prompt mentions it conditionally, a real
+  commercial_property fixture's KPIs come back numerically correct
+  through the tool (matching `test_industry_kpis.py`'s own hand-verified
+  values), a defensive case where the model calls the tool despite it
+  not being offered is rejected cleanly rather than crashing the turn,
+  and `description` is confirmed present in the result; 2 in
+  `tests/test_ai_analyst_api.py`: a full round trip through the real
+  `/ask` endpoint for a `commercial_property` workspace returns the
+  pack's genuine KPI values, and a `general` workspace never has the
+  tool offered at all). No frontend changes this round.
+- ✅ **Verified live against the real running server and the real
+  Anthropic API, not just scripted fakes** — this module's own docstring
+  had said since it was first written that the tool-calling loop's
+  plumbing was tested but "it does NOT verify that a real Claude model
+  behaves sensibly," so this was the first time that gap was actually
+  closed for this specific tool: re-created the exact education-pack
+  workspace and CSV that originally surfaced the inaccuracy, asked the
+  real AI analyst the exact same question ("Is there an attendance gap
+  between Pupil Premium and other students?") through the real `/ask`
+  endpoint, and confirmed it called `compute_industry_kpis` for real and
+  answered with the exact correct figure (a 3.7% gap) — a direct
+  before/after fix of the specific wrong answer this round exists to
+  correct, not a new scenario invented to look good.
 
 ## Known limitations in what's built
 

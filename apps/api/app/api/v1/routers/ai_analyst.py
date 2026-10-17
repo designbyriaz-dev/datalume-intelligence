@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_current_user, get_llm_client_dep, get_object_storage
 from app.api.resolvers import get_dataset_or_404, get_table_chain_or_404, get_workspace_or_404
+from app.core.industry_packs import get_industry_pack
 from app.db.session import get_db
 from app.models.ai import AIConversation, AIMessage, MessageRole
 from app.models.dataset import Dataset, DatasetTable
@@ -15,6 +16,7 @@ from app.services.ai.llm_client import LLMClient
 from app.services.ai.planner import run_conversation_turn
 from app.services.authz import require_workspace_access
 from app.services.datasets import get_dataset_table_dataframe
+from app.services.industry_matching import get_effective_field_mapping
 from app.services.storage import ObjectStorage
 
 router = APIRouter(tags=["ai-analyst"])
@@ -106,12 +108,24 @@ async def ask(
 
     df = await get_dataset_table_dataframe(storage, table)
 
+    # Gives the planner access to this workspace's own precise KPI
+    # engine (see app/services/ai/planner.py's compute_industry_kpis
+    # tool) when one exists — None for a workspace with no industry
+    # pack (general/other), same as every other industry-gated feature
+    # in this app; the AI analyst still works fine without it, just
+    # without that one extra tool.
+    industry_pack = get_industry_pack(workspace.industry)
+    field_mapping = get_effective_field_mapping(table, industry_pack, df.columns) if industry_pack else None
+
     result = await run_conversation_turn(
         llm_client,
         df=df,
         table_profile=table.profile,
         history=_history_to_anthropic_messages(history_messages),
         question=payload.question,
+        industry_pack=industry_pack,
+        field_mapping=field_mapping,
+        kpi_window_months=workspace.kpi_window_months,
     )
 
     tool_calls_json = [

@@ -10,8 +10,10 @@ from dataclasses import asdict
 
 import polars as pl
 
+from app.core.industry_packs import COMMERCIAL_PROPERTY
 from app.services.ai.llm_client import LLMClient, LLMResponse, ToolUseBlock
-from app.services.ai.planner import run_conversation_turn
+from app.services.ai.planner import INDUSTRY_KPI_TOOL_NAME, run_conversation_turn
+from app.services.industry_matching import resolve_field_mapping
 from app.services.profiling import profile_table
 
 
@@ -274,3 +276,126 @@ async def test_planner_stops_after_max_iterations_instead_of_looping_forever():
 
     assert result.hit_iteration_limit is True
     assert len(client.calls) == 5  # MAX_TOOL_ITERATIONS, not 10 — the loop actually bounded itself
+
+
+_COMMERCIAL_DF = pl.DataFrame(
+    {
+        "Unit": ["A1", "A2", "A3", "A4", "A5"],
+        "Tenant Name": ["Acme Ltd", "Beta Co", "Acme Ltd", "Gamma Inc", "Delta PLC"],
+        "Rent (PCM)": [1200, 950, 2000, 2100, 500],
+        "Lease Expiry Date": ["2027-01-15", "2026-03-20", "2026-11-10", "2030-01-01", "2025-06-01"],
+        "Occupancy Status": ["Occupied", "Occupied", "Vacant", "Occupied", "Occupied"],
+        "Rent Arrears": [0, 100, 0, 50, 0],
+    }
+)
+
+
+def test_industry_kpi_tool_included_only_when_a_pack_is_provided():
+    from app.services.ai.planner import _industry_kpi_tool_definition
+
+    with_pack = _industry_kpi_tool_definition(COMMERCIAL_PROPERTY)
+    assert with_pack["name"] == INDUSTRY_KPI_TOOL_NAME
+    assert "Total Rent Roll" in with_pack["description"]
+
+
+async def test_planner_passes_industry_kpi_tool_to_the_model_only_when_a_pack_is_given():
+    client = ScriptedLLMClient([LLMResponse(text="hi", tool_uses=[], stop_reason="end_turn")])
+    await run_conversation_turn(
+        client, df=_sample_df(), table_profile=_sample_profile(), history=[], question="hi", industry_pack=None
+    )
+    tool_names_without_pack = {t["name"] for t in client.calls[0]["tools"]}
+    assert INDUSTRY_KPI_TOOL_NAME not in tool_names_without_pack
+
+    client2 = ScriptedLLMClient([LLMResponse(text="hi", tool_uses=[], stop_reason="end_turn")])
+    await run_conversation_turn(
+        client2,
+        df=_sample_df(),
+        table_profile=_sample_profile(),
+        history=[],
+        question="hi",
+        industry_pack=COMMERCIAL_PROPERTY,
+        field_mapping=resolve_field_mapping(COMMERCIAL_PROPERTY, _sample_df().columns),
+    )
+    tool_names_with_pack = {t["name"] for t in client2.calls[0]["tools"]}
+    assert INDUSTRY_KPI_TOOL_NAME in tool_names_with_pack
+
+
+async def test_planner_system_prompt_mentions_the_industry_kpi_tool_when_a_pack_is_given():
+    client = ScriptedLLMClient([LLMResponse(text="hi", tool_uses=[], stop_reason="end_turn")])
+    await run_conversation_turn(
+        client,
+        df=_sample_df(),
+        table_profile=_sample_profile(),
+        history=[],
+        question="hi",
+        industry_pack=COMMERCIAL_PROPERTY,
+        field_mapping=resolve_field_mapping(COMMERCIAL_PROPERTY, _sample_df().columns),
+    )
+    assert COMMERCIAL_PROPERTY.name in client.calls[0]["system"]
+    assert INDUSTRY_KPI_TOOL_NAME in client.calls[0]["system"]
+
+
+async def test_planner_executes_industry_kpi_tool_call_with_real_numbers():
+    mapping = resolve_field_mapping(COMMERCIAL_PROPERTY, _COMMERCIAL_DF.columns)
+    client = ScriptedLLMClient(
+        [
+            LLMResponse(
+                text=None,
+                tool_uses=[ToolUseBlock(id="tu_1", name=INDUSTRY_KPI_TOOL_NAME, input={})],
+                stop_reason="tool_use",
+            ),
+            LLMResponse(text="Your total rent roll is £6,750.", tool_uses=[], stop_reason="end_turn"),
+        ]
+    )
+
+    result = await run_conversation_turn(
+        client,
+        df=_COMMERCIAL_DF,
+        table_profile=asdict(profile_table("Sheet1", _COMMERCIAL_DF)),
+        history=[],
+        question="What's our total rent roll?",
+        industry_pack=COMMERCIAL_PROPERTY,
+        field_mapping=mapping,
+    )
+
+    assert result.tool_calls[0].name == INDUSTRY_KPI_TOOL_NAME
+    assert result.tool_calls[0].error is None
+    kpis_by_id = {k["kpi_id"]: k for k in result.tool_calls[0].result["kpis"]}
+    # Same fixture, same expected value as
+    # test_industry_kpis.py::test_commercial_property_kpis_are_numerically_correct.
+    assert kpis_by_id["total_rent_roll"]["value"] == 6750.0
+    assert kpis_by_id["occupancy_rate"]["value"] == 80.0
+    # The model only ever sees name/value/formatted from KPIResult
+    # itself — description is merged in separately from the pack
+    # definition, caught as a real gap after a live model call got a
+    # KPI's sign direction backwards with no definition to go on.
+    assert kpis_by_id["total_rent_roll"]["description"] == "Sum of rent across all units"
+    assert result.tool_calls[0].result["pack_name"] == COMMERCIAL_PROPERTY.name
+
+
+async def test_planner_industry_kpi_tool_call_rejected_cleanly_when_not_actually_available():
+    """Defensive case: the model calls compute_industry_kpis even though
+    it wasn't offered (industry_pack=None for this turn) — must not
+    crash the whole turn."""
+    client = ScriptedLLMClient(
+        [
+            LLMResponse(
+                text=None,
+                tool_uses=[ToolUseBlock(id="tu_1", name=INDUSTRY_KPI_TOOL_NAME, input={})],
+                stop_reason="tool_use",
+            ),
+            LLMResponse(text="I couldn't compute that.", tool_uses=[], stop_reason="end_turn"),
+        ]
+    )
+
+    result = await run_conversation_turn(
+        client,
+        df=_sample_df(),
+        table_profile=_sample_profile(),
+        history=[],
+        question="What's our total rent roll?",
+        industry_pack=None,
+    )
+
+    assert result.tool_calls[0].error is not None
+    assert "not available" in result.tool_calls[0].error

@@ -496,7 +496,8 @@ EDUCATION = IndustryPack(
             "pupil_premium_attendance_gap",
             "Pupil Premium Attendance Gap",
             "Average attendance of Pupil Premium students minus average attendance of everyone "
-            "else — can be negative",
+            "else. Positive means Pupil Premium students attend MORE than their peers; negative "
+            "means they attend LESS.",
             "percentage",
             ("student_id", "pupil_premium", "sessions_attended", "sessions_possible"),
         ),
