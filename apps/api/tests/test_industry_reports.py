@@ -461,3 +461,82 @@ async def test_outsider_cannot_generate_public_sector_budget_variance_report(cli
         headers=_auth(outsider_token),
     )
     assert resp.status_code == 403
+
+
+# Same dataset as
+# test_industry_kpis.py::test_education_kpis_are_numerically_correct
+# (S1 split across two rows on purpose, to exercise real per-student
+# aggregation through the full upload pipeline), plus a Year Group
+# column that test doesn't need but this report's "attendance by year
+# group" section does.
+EDUCATION_CSV = (
+    b"Student ID,Sessions Possible,Sessions Attended,Pupil Premium,Year Group,Attainment Score\n"
+    b"S1,50,50,Yes,Year 7,65\n"
+    b"S1,50,40,Yes,Year 7,70\n"
+    b"S2,50,40,Yes,Year 8,55\n"
+    b"S3,200,190,No,Year 8,80\n"
+    b"S4,100,99,No,Year 9,90\n"
+    b"S5,150,75,No,Year 9,45\n"
+)
+
+
+async def _setup_education_table(client: AsyncClient, token: str) -> str:
+    ws_resp = await client.post(
+        "/api/v1/workspaces", json={"name": "Education Report Test", "industry": "education"},
+        headers=_auth(token),
+    )
+    workspace_id = ws_resp.json()["id"]
+    files = {"file": ("data.csv", EDUCATION_CSV, "text/csv")}
+    upload_resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/datasets",
+        data={"name": "Attendance"},
+        files=files,
+        headers=_auth(token),
+    )
+    assert upload_resp.status_code == 201, upload_resp.text
+    dataset_id = upload_resp.json()["dataset_id"]
+    detail = (await client.get(f"/api/v1/datasets/{dataset_id}", headers=_auth(token))).json()
+    version = detail["versions"][-1]
+    assert version["status"] == "ready", version
+    return version["tables"][0]["id"]
+
+
+async def test_generate_and_download_pupil_attendance_performance_report(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "eduowner@example.com")
+    table_id = await _setup_education_table(client, token)
+
+    gen_resp = await client.post(
+        f"/api/v1/dataset-tables/{table_id}/reports/pupil-attendance-performance", headers=_auth(token)
+    )
+    assert gen_resp.status_code == 201, gen_resp.text
+    report = gen_resp.json()
+    assert report["report_type"] == "pupil_attendance_performance"
+    assert report["file_size_bytes"] > 0
+
+    download_resp = await client.get(f"/api/v1/reports/{report['id']}/download", headers=_auth(token))
+    assert download_resp.status_code == 200
+    assert download_resp.content.startswith(b"%PDF-")
+    assert len(download_resp.content) == report["file_size_bytes"]
+
+
+async def test_pupil_attendance_performance_report_rejected_for_wrong_industry(client: AsyncClient) -> None:
+    token = await _register_and_login(client, "eduowner2@example.com")
+    table_id = await _setup_table(client, token, "general")
+
+    resp = await client.post(
+        f"/api/v1/dataset-tables/{table_id}/reports/pupil-attendance-performance", headers=_auth(token)
+    )
+    assert resp.status_code == 400
+    assert "education" in resp.json()["detail"]
+
+
+async def test_outsider_cannot_generate_pupil_attendance_performance_report(client: AsyncClient) -> None:
+    owner_token = await _register_and_login(client, "eduowner3@example.com")
+    outsider_token = await _register_and_login(client, "eduoutsider3@example.com")
+    table_id = await _setup_education_table(client, owner_token)
+
+    resp = await client.post(
+        f"/api/v1/dataset-tables/{table_id}/reports/pupil-attendance-performance",
+        headers=_auth(outsider_token),
+    )
+    assert resp.status_code == 403

@@ -4128,6 +4128,65 @@ above), this builds public_sector's. education's is still open.
   report PDF) via a direct boto3 call, so no test litter was left
   behind in real storage.
 
+## Post-Phase-7: pupil attendance & performance report template
+
+Closes the other half of the gap the public sector report template
+section above left open: education now has a report template too, so
+both packs named in "Immediate next steps" item 12 as having real
+domain input and KPIs but no report template are done.
+
+- ✅ **`generate_pupil_attendance_report_pdf`** (`app/services/reports.py`)
+  — the eighth specialist report template. Reuses
+  `_per_student_attendance` (and `_is_truthy_flag`) directly from
+  `app/services/industry_kpis.py` rather than re-deriving per-student
+  attendance a second way — the same KPI-engine-reuse principle every
+  prior report follows, and specifically the principle whose absence
+  from the AI analyst caused a real wrong answer before
+  `compute_industry_kpis` existed (see "Post-Phase-7: AI analyst
+  industry KPI tool" above): naive row-level grouping over/under-weights
+  students whose attendance is split across multiple rows (one per
+  term, say). Three sections beyond the shared KPI table, each
+  answering one of the pack's own `suggested_questions` with actual
+  student ids/year groups a pastoral lead could act on, not just the
+  aggregate rate already in the KPI table: persistently absent students
+  (below 90% — the DfE's own official threshold, sorted worst first),
+  a Pupil Premium vs. other attendance comparison (only rendered when
+  `pupil_premium` is mapped), and attendance by year group (only
+  rendered when `year_group` is mapped, session-weighted the same way
+  `overall_attendance_rate` is, sorted worst first).
+- ✅ **Wired through every layer**, same as the public sector report:
+  `IndustryPack.report_templates` on `EDUCATION`, a new
+  `POST /dataset-tables/{id}/reports/pupil-attendance-performance`
+  route (400 for non-education, 403 for an outsider), the
+  scheduled-reports registry, and the frontend
+  (`INDUSTRY_REPORTS`/`INDUSTRY_REPORT_TYPES`/`REPORT_TYPE_LABELS` in
+  `apps/web/src/app/dashboard/workspaces/[id]/page.tsx`, plus
+  `api.generatePupilAttendanceReport`).
+- ✅ Automated backend tests: 401/401 passing, 13 skipped (3 new in
+  `tests/test_industry_reports.py`, matching every other report's
+  generate/download/wrong-industry/outsider-403 test shape; the new
+  report_type also added as a case inside the same two cross-cutting
+  `tests/test_scheduled_reports.py` tests the public sector addendum
+  above extended).
+- ✅ Frontend typecheck: clean (`tsc --noEmit`).
+- ✅ **Verified live against a real running server and the real R2
+  bucket** (same `apps/api/.env` real credentials as every other live
+  check since "Post-Phase-7: S3Storage verified against real
+  MinIO"'s addendum above): registered a real account, created a real
+  `education` workspace, uploaded a real 6-row attendance CSV (one
+  student, S1, deliberately split across two rows — the exact case
+  that makes per-row grouping wrong and per-student grouping right),
+  called the new endpoint, downloaded a real 3,089-byte PDF, and
+  hand-checked every number against the source data: per-student rates
+  (S1 90%, S2 80%, S3 95%, S4 99%, S5 50%), the persistently-absent
+  list correctly containing only S5 and S2 sorted worst-first, the
+  Pupil Premium comparison (85.0% vs. 81.3%, gap +3.7 — matching the
+  sign convention fixed in "Post-Phase-7: AI analyst industry KPI
+  tool" above), and the year-group breakdown (Year 9 69.6%, Year 7
+  90.0%, Year 8 92.0%, sorted worst-first) — all correct. Cleaned up
+  afterward: deleted the 3 real objects this run wrote to the
+  production R2 bucket via a direct boto3 call.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -4241,16 +4300,18 @@ above), this builds public_sector's. education's is still open.
     above. Gated behind `STRIPE_TAX_ENABLED` (default off): still needs
     a one-time Stripe Dashboard step (the account's business address)
     only the account holder can complete before it's actually live.
-12. ~~More specialist report templates~~ — three more done: a
+12. ~~More specialist report templates~~ — four more done: a
     Compliance Exceptions Report for social_housing, a Repairs &
     Maintenance Report for residential_property (each pack's second
     report — see "Post-Phase-7: fifth specialist report template" and
-    "Post-Phase-7: sixth specialist report template" above), and a
-    Budget Variance Report for public_sector (its first report — see
-    "Post-Phase-7: public sector budget variance report template"
-    above). Still open: education still has no report template of its
-    own, and further second/third reports on existing packs (Investment
-    Planning, etc.) remain possible — the pattern is now proven seven
+    "Post-Phase-7: sixth specialist report template" above), a Budget
+    Variance Report for public_sector, and a Pupil Attendance &
+    Performance Report for education (each pack's first report — see
+    "Post-Phase-7: public sector budget variance report template" and
+    "Post-Phase-7: pupil attendance & performance report template"
+    above). Every industry pack now has at least one report template.
+    Still possible: further second/third reports on existing packs
+    (Investment Planning, etc.) — the pattern is now proven eight
     times.
 13. ~~A schema-confirmation UI for industry field mappings~~ — done, see
     "Post-Phase-7: industry field mapping confirmation" above.

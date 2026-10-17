@@ -109,6 +109,7 @@ async def test_newly_supported_report_types_require_matching_industry(client: As
         "social_housing_compliance_exceptions",
         "business_performance",
         "public_sector_budget_variance",
+        "pupil_attendance_performance",
     ):
         resp = await client.post(
             f"/api/v1/workspaces/{workspace_id}/scheduled-reports",
@@ -346,6 +347,12 @@ PUBLIC_SECTOR_CSV = (
     b"Highways,Resurfacing,50000,20000,45000\n"
 )
 
+EDUCATION_CSV = (
+    b"Student ID,Sessions Possible,Sessions Attended,Pupil Premium,Year Group\n"
+    b"S1,100,90,Yes,Year 7\n"
+    b"S2,50,40,No,Year 8\n"
+)
+
 
 async def _setup_industry_table(client: AsyncClient, token: str, industry: str, csv_bytes: bytes) -> tuple[str, str]:
     ws_resp = await client.post(
@@ -377,6 +384,7 @@ async def test_scheduler_generates_each_industry_report_type(
         ("social_housing", SOCIAL_HOUSING_CSV, "social_housing_compliance_exceptions", "shcesched"),
         ("business_finance", BUSINESS_FINANCE_CSV, "business_performance", "bfsched"),
         ("public_sector", PUBLIC_SECTOR_CSV, "public_sector_budget_variance", "pssched"),
+        ("education", EDUCATION_CSV, "pupil_attendance_performance", "edusched"),
     ]
     for industry, csv_bytes, report_type, email_prefix in cases:
         token = await _register_and_login(client, f"{email_prefix}@example.com")

@@ -523,7 +523,7 @@ EDUCATION = IndustryPack(
         "Session": "Attendance is recorded per half-day session (AM/PM) — the DfE's standard reporting unit.",
         "UPN": "Unique Pupil Number — a pupil's unique identifier that follows them across UK schooling.",
     },
-    report_templates=(),
+    report_templates=("pupil_attendance_performance",),
     compliance_caveat=(
         "Attendance and attainment figures are calculated from the data you uploaded and are "
         "indicative only — confirm against your school's official MIS (management information "

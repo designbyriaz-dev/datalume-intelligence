@@ -505,6 +505,7 @@ const INDUSTRY_REPORTS: Record<string, ReportDescriptor[]> = {
   ],
   business_finance: [{ label: "Portfolio report", generate: api.generateBusinessFinanceReport }],
   public_sector: [{ label: "Budget variance report", generate: api.generatePublicSectorBudgetVarianceReport }],
+  education: [{ label: "Attendance & performance report", generate: api.generatePupilAttendanceReport }],
 };
 
 function IndustryKpiPanel({ tableId, token, industry }: { tableId: string; token: string; industry: string }) {
@@ -1025,6 +1026,7 @@ const INDUSTRY_REPORT_TYPES: Record<string, string[]> = {
   social_housing: ["social_housing_asset", "social_housing_compliance_exceptions"],
   business_finance: ["business_performance"],
   public_sector: ["public_sector_budget_variance"],
+  education: ["pupil_attendance_performance"],
 };
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
@@ -1036,6 +1038,7 @@ const REPORT_TYPE_LABELS: Record<string, string> = {
   social_housing_compliance_exceptions: "Social Housing Compliance Exceptions",
   business_performance: "Business Performance",
   public_sector_budget_variance: "Public Sector Budget Variance",
+  pupil_attendance_performance: "Pupil Attendance & Performance",
 };
 
 const SCHEDULE_FREQUENCIES = ["daily", "weekly", "monthly"];

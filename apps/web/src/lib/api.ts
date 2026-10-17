@@ -941,6 +941,13 @@ export const api = {
       token
     ),
 
+  generatePupilAttendanceReport: (token: string, tableId: string) =>
+    request<ReportMeta>(
+      `/api/v1/dataset-tables/${tableId}/reports/pupil-attendance-performance`,
+      { method: "POST" },
+      token
+    ),
+
   generateExecutiveIntelligenceReport: (token: string, tableId: string) =>
     request<ReportMeta>(
       `/api/v1/dataset-tables/${tableId}/reports/executive-intelligence`,

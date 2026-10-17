@@ -38,6 +38,7 @@ from app.services.reports import (
     generate_commercial_property_report_pdf,
     generate_data_quality_report_pdf,
     generate_public_sector_budget_variance_report_pdf,
+    generate_pupil_attendance_report_pdf,
     generate_residential_property_report_pdf,
     generate_residential_repairs_maintenance_report_pdf,
     generate_social_housing_compliance_exceptions_report_pdf,
@@ -57,6 +58,7 @@ REPORT_TYPE_REQUIRED_INDUSTRY = {
     "social_housing_compliance_exceptions": "social_housing",
     "business_performance": "business_finance",
     "public_sector_budget_variance": "public_sector",
+    "pupil_attendance_performance": "education",
 }
 
 VALID_REPORT_TYPES = {"data_quality", *REPORT_TYPE_REQUIRED_INDUSTRY.keys()}
@@ -166,6 +168,16 @@ async def _generate_report_bytes(
             )
         if scheduled.report_type == "public_sector_budget_variance":
             return generate_public_sector_budget_variance_report_pdf(
+                dataset_name=dataset.name,
+                table_sheet_name=table.sheet_name,
+                generated_by_name="Scheduled report",
+                df=df,
+                mapping=mapping,
+                kpi_results=kpi_results,
+                compliance_caveat=pack.compliance_caveat,
+            )
+        if scheduled.report_type == "pupil_attendance_performance":
+            return generate_pupil_attendance_report_pdf(
                 dataset_name=dataset.name,
                 table_sheet_name=table.sheet_name,
                 generated_by_name="Scheduled report",

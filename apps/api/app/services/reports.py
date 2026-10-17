@@ -26,7 +26,14 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from app.core.industry_packs import IndustryPack
 from app.models.dataset import DatasetTable
 from app.services.analytics import AnalyticsError, _parse_date_cell, group_aggregate, time_trend
-from app.services.industry_kpis import DEFAULT_KPI_WINDOW_MONTHS, _VACANT_MARKERS, _add_months, KPIResult
+from app.services.industry_kpis import (
+    DEFAULT_KPI_WINDOW_MONTHS,
+    _VACANT_MARKERS,
+    _add_months,
+    _is_truthy_flag,
+    _per_student_attendance,
+    KPIResult,
+)
 
 _POOR_EPC_RATINGS = {"E", "F", "G"}
 
@@ -1007,6 +1014,166 @@ def generate_public_sector_budget_variance_report_pdf(
             "app/services/industry_kpis.py for the exact formula behind each metric. This report "
             "contains no AI-generated narrative or figures.",
             ParagraphStyle("DLFootnote9", parent=_STYLES["Normal"], fontSize=7, textColor=colors.grey),
+        )
+    )
+
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def generate_pupil_attendance_report_pdf(
+    *,
+    dataset_name: str,
+    table_sheet_name: str,
+    generated_by_name: str,
+    df: pl.DataFrame,
+    mapping: dict[str, str | None],
+    kpi_results: list[KPIResult],
+    compliance_caveat: str | None,
+) -> bytes:
+    """The eighth specialist report template, and the first for
+    education — the second (and, for now, last) of the two packs
+    docs/CHECKLIST.md's "Immediate next steps" item 12 named as having
+    real domain input and KPIs but no report template (public_sector's
+    was the first — see generate_public_sector_budget_variance_report_pdf
+    above).
+
+    Reuses `_per_student_attendance` from app/services/industry_kpis.py
+    directly rather than re-deriving per-student rates a second,
+    possibly-drifting way — the same "don't redefine a KPI's own logic
+    in the report layer" principle the compliance-exceptions report's
+    docstring established. That function groups by student first (a
+    student's attendance may be split across several rows — one per
+    term, say) before computing a rate, which is exactly why the AI
+    analyst's own answer to "is there an attendance gap" was wrong
+    before compute_industry_kpis existed (see "Post-Phase-7: AI analyst
+    industry KPI tool" above): naive row-level grouping over- or
+    under-weights students with more rows. This report's row-level
+    section (persistently absent students) is built from that same
+    per-student dict, not from raw rows, for the same reason.
+
+    Three sections beyond the shared KPI table, each answering one of
+    the pack's own suggested_questions with the actual names/ids a
+    pastoral lead or SENCO would need to act on, not just the
+    aggregate rate the KPI table already shows: persistently absent
+    students (<90% attendance, DfE's own threshold — sorted worst
+    first), a Pupil Premium vs. other attendance comparison (only
+    present when pupil_premium is mapped — not every school tracks
+    it), and attendance by year group (only present when year_group is
+    mapped, session-weighted the same way overall_attendance_rate is,
+    sorted worst first so the year group needing attention is at the
+    top)."""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm, leftMargin=2 * cm, rightMargin=2 * cm
+    )
+
+    story = []
+    story.append(Paragraph("Pupil Attendance &amp; Performance Report", _TITLE_STYLE))
+    story.append(
+        Paragraph(
+            f"{dataset_name} &mdash; {table_sheet_name}<br/>"
+            f"Generated {datetime.now(timezone.utc).strftime('%d %B %Y, %H:%M UTC')} by {generated_by_name}",
+            _META_STYLE,
+        )
+    )
+
+    if compliance_caveat:
+        caveat_style = ParagraphStyle(
+            "DLComplianceCaveat4",
+            parent=_STYLES["Normal"],
+            textColor=colors.HexColor("#92400e"),
+            backColor=colors.HexColor("#fffbeb"),
+            borderColor=colors.HexColor("#fcd34d"),
+            borderWidth=0.5,
+            borderPadding=8,
+            spaceAfter=16,
+        )
+        story.append(Paragraph(compliance_caveat, caveat_style))
+
+    story.append(Paragraph("Key metrics", _H2_STYLE))
+    kpi_rows = [["Metric", "Value"]]
+    for kpi in kpi_results:
+        kpi_rows.append([kpi.name, kpi.formatted if kpi.error is None else "Not available"])
+    story.append(_simple_table(kpi_rows, [9 * cm, 6 * cm]))
+
+    student_col = mapping.get("student_id")
+    pp_col = mapping.get("pupil_premium")
+    possible_col = mapping.get("sessions_possible")
+    attended_col = mapping.get("sessions_attended")
+    year_group_col = mapping.get("year_group")
+
+    story.append(Paragraph("Persistently absent students (below 90% attendance)", _H2_STYLE))
+    if student_col and possible_col and attended_col:
+        rates = _per_student_attendance(df, mapping)
+        absent = sorted(((sid, rate) for sid, rate in rates.items() if rate < 90), key=lambda r: r[1])
+        if absent:
+            rows = [["Student", "Attendance"]] + [[sid, f"{rate:.1f}%"] for sid, rate in absent]
+            story.append(_simple_table(rows, [9 * cm, 6 * cm]))
+        else:
+            story.append(Paragraph("No students are below the 90% persistent absence threshold.", _BODY_STYLE))
+    else:
+        story.append(Paragraph("Could not compute: student, sessions possible and sessions attended must all be mapped.", _BODY_STYLE))
+
+    if student_col and pp_col and possible_col and attended_col:
+        sub = df.select([student_col, pp_col, possible_col, attended_col]).drop_nulls()
+        grouped = sub.group_by(student_col).agg(
+            [
+                pl.col(pp_col).first().alias("pp"),
+                pl.col(attended_col).sum().alias("attended"),
+                pl.col(possible_col).sum().alias("possible"),
+            ]
+        )
+        pp_rates: list[float] = []
+        other_rates: list[float] = []
+        for row in grouped.to_dicts():
+            possible = row["possible"]
+            if not possible or possible <= 0:
+                continue
+            rate = row["attended"] / possible * 100
+            (pp_rates if _is_truthy_flag(row["pp"]) else other_rates).append(rate)
+
+        story.append(Paragraph("Attendance by Pupil Premium status", _H2_STYLE))
+        if pp_rates and other_rates:
+            rows = [
+                ["Group", "Students", "Average Attendance"],
+                ["Pupil Premium", str(len(pp_rates)), f"{sum(pp_rates) / len(pp_rates):.1f}%"],
+                ["Other", str(len(other_rates)), f"{sum(other_rates) / len(other_rates):.1f}%"],
+            ]
+            story.append(_simple_table(rows, [5 * cm, 4 * cm, 6 * cm]))
+        else:
+            story.append(Paragraph("Not enough data in both groups to compare.", _BODY_STYLE))
+
+    if year_group_col and possible_col and attended_col:
+        breakdown = (
+            df.group_by(year_group_col)
+            .agg([pl.col(attended_col).sum().alias("attended"), pl.col(possible_col).sum().alias("possible")])
+            .to_dicts()
+        )
+        year_rates = [
+            (row[year_group_col], row["attended"] / row["possible"] * 100)
+            for row in breakdown
+            if row["possible"]
+        ]
+        year_rates.sort(key=lambda r: r[1])
+
+        story.append(Paragraph("Attendance by year group", _H2_STYLE))
+        if year_rates:
+            rows = [["Year Group", "Attendance"]] + [
+                [str(label) if label is not None else "(missing)", f"{rate:.1f}%"] for label, rate in year_rates
+            ]
+            story.append(_simple_table(rows, [9 * cm, 6 * cm]))
+        else:
+            story.append(Paragraph("No year group data available.", _BODY_STYLE))
+
+    story.append(Spacer(1, 20))
+    story.append(
+        Paragraph(
+            "Methodology: all figures are deterministic calculations over the uploaded data — see "
+            "app/services/industry_kpis.py for the exact formula behind each metric, including the "
+            "90% persistent absence threshold (the DfE's own official definition). This report "
+            "contains no AI-generated narrative or figures.",
+            ParagraphStyle("DLFootnote10", parent=_STYLES["Normal"], fontSize=7, textColor=colors.grey),
         )
     )
 
