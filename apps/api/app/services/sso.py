@@ -31,14 +31,29 @@ httpOnly session cookie /auth/login does, so a real SSO session would
 have silently logged itself out on the next page reload — fixed in
 app/api/v1/routers/sso.py.
 
-What is still NOT verified: only Google has been tried — Okta and Azure
-AD haven't, and either can have its own quirks (different claim names,
-different error response shapes, token endpoint auth methods beyond
-client_secret_post). The Google app itself is also still in
-"Testing" publishing status with one whitelisted test user, not
-verified/published. Do not report SSO as fully production-ready until a
-second real IdP has been tried and the Google app has moved past
-Testing status.
+Since also verified against a second real identity provider: a real
+Microsoft Entra ID app registration, a real consent screen, a real
+login driven through to a real User row (see docs/CHECKLIST.md's
+updated "SSO via OIDC" section). That pass caught the exact kind of
+quirk this docstring used to warn about in the abstract: Microsoft's
+standard v2.0 ID token has no email_verified claim at all under the
+default `openid email profile` scopes (confirmed by logging the real
+token's raw claims, not assumed) — this module's verification check
+used to treat "claim absent" the same as "claim false"
+(resolve_or_create_user_from_oidc_claims below), which Google's tokens
+never exposed as a problem since Google always sends the claim
+explicitly. No Entra ID/Azure AD login could have succeeded until this
+was caught and fixed to only reject an *explicit* false.
+
+What is still NOT verified: Okta hasn't been tried, and may have its
+own further quirks (different claim names, different error response
+shapes, token endpoint auth methods beyond client_secret_post). The
+Google app itself is also still in "Testing" publishing status with
+one whitelisted test user, not verified/published; the Entra ID app
+registration is a real, fully-functional app (not gated behind a
+publishing-status restriction the way Google's consumer OAuth
+consent screens are), but has not been reviewed for production
+readiness either (e.g., token lifetime policy, conditional access).
 """
 
 from __future__ import annotations
@@ -102,13 +117,23 @@ async def resolve_or_create_user_from_oidc_claims(db: AsyncSession, claims: dict
     OIDC claims (as authlib's jwt.decode().validate() would produce) and
     finds-or-creates the corresponding local User, linked by email.
 
-    Refuses to link/create an account from an unverified email — an IdP
-    that hands back email_verified=False is explicitly not trusted to
-    assert account ownership."""
+    Refuses to link/create an account when the IdP explicitly asserts the
+    email is unverified (email_verified: false) — that's a real red flag,
+    not trusted to assert account ownership. Deliberately does NOT reject
+    an IdP that omits the claim entirely: verified live against a real
+    Microsoft Entra ID app registration (see docs/CHECKLIST.md), whose
+    standard v2.0 ID token has no email_verified claim at all under the
+    default `openid email profile` scopes — confirmed by logging the raw
+    claims from a real token, not assumed. Treating "claim absent" the
+    same as "claim false" (the original, Google-only-tested version of
+    this check did exactly that) would mean no Entra ID/Azure AD login
+    could ever succeed, despite Microsoft's own domain-verification
+    process at tenant setup being a real equivalent to what
+    email_verified asserts for providers that send it."""
     email = claims.get("email")
     if not email:
         raise SSOError("The identity provider did not return an email claim.")
-    if not claims.get("email_verified", False):
+    if "email_verified" in claims and not claims["email_verified"]:
         raise SSOError("The identity provider's email is not verified — refusing to link an account.")
 
     result = await db.execute(select(User).where(User.email == email))

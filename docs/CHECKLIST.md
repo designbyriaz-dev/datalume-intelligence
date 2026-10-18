@@ -714,12 +714,74 @@ below for why.
   form-encoded exchange with no cryptography in it, so there's no
   real loss), while keeping authlib's `jose` module for every
   security-critical step.
-  **What's still not verified**: only Google has been tried — a real
-  Okta/Azure AD login hasn't, and those providers can have their own
-  quirks (different claim names, different token-endpoint auth methods).
-  The Google app is also still in "Testing" publishing status with one
-  whitelisted test user, not verified/published — fine for this
-  verification pass, not yet a production-ready SSO setup. See
+  **Addendum — verified against a second real identity provider,
+  Microsoft Entra ID, and a real interop bug caught and fixed**: a real
+  Microsoft Entra ID tenant and app registration were created on the
+  account holder's own Microsoft account (`riaz@datalume.co.uk`) — not
+  trivial to get: the account's first few self-service paths all
+  failed for real reasons (App registrations: "not contained within
+  any directory"; the M365 Developer Program: "you don't currently
+  qualify for a sandbox subscription"; Azure's own "Create a tenant"
+  resource: a real 401) before the account holder completed Azure's
+  free trial signup (their own card entry — the one step in this whole
+  round genuinely requiring the account holder, since entering payment
+  details isn't something this session does even when asked), which
+  provisioned a real `riazdatalumeco.onmicrosoft.com` tenant. A real
+  app registration ("DataLume Intelligence", Web platform, redirect
+  URI matching `OIDC_REDIRECT_URI`) and a real client secret were
+  created from there, and the OIDC discovery URL was confirmed
+  reachable and genuine
+  (`https://login.microsoftonline.com/<tenant>/v2.0/.well-known/openid-configuration`)
+  before trying a real login.
+
+  The first real login attempt failed — for a genuinely new reason:
+  `Sign-in failed: The identity provider's email is not verified —
+  refusing to link an account.` Investigated by temporarily logging
+  the real decoded ID token's raw claims (not guessed): Microsoft's
+  standard v2.0 ID token has **no `email_verified` claim at all** under
+  the default `openid email profile` scopes — `email`, `name`, `oid`,
+  `preferred_username` were all present, `email_verified` simply
+  wasn't a key in the dict. `resolve_or_create_user_from_oidc_claims`
+  (`app/services/sso.py`) read that with `claims.get("email_verified",
+  False)` — treating "the IdP didn't send this claim" identically to
+  "the IdP explicitly says false". Google always sends the claim
+  explicitly, so this gap was invisible through every Google-only test
+  and the real Google login verified above; it meant **no Entra
+  ID/Azure AD login could ever have succeeded** against this code as
+  written, regardless of account type. Fixed to only reject an
+  *explicit* `email_verified: false` (`"email_verified" in claims and
+  not claims["email_verified"]`) — an IdP that omits the claim entirely
+  is accepted, since Microsoft's own tenant/domain-verification process
+  at setup is a real equivalent to what the claim asserts for IdPs
+  that send it. `tests/test_sso.py` gained
+  `test_accepts_email_when_idp_omits_the_verified_claim_entirely`, a
+  direct regression test for exactly this — the existing
+  `test_rejects_unverified_email` (explicit `false`) still passes
+  unchanged, proving the fix is additive, not a loosening of the real
+  protection.
+
+  Re-ran the real login after the fix: genuine success, end to end —
+  `GET /api/v1/sso/login` → Microsoft's real sign-in (no password
+  needed, already signed in) → (the first attempt needed a real OAuth
+  consent grant — explicit permission was asked for and given in chat
+  before clicking it, the same "Explicit permission required" rule
+  applied throughout this project) → `/sso/callback` → a real new
+  `User` row created with the real name/email from the token → landed
+  on `/dashboard` genuinely logged in ("Welcome, DataLume
+  Intelligence", "Free plan", "Log out" present) → confirmed the
+  session survives a full page reload, the same cookie-persistence
+  check the Google round above added. Both `app/services/sso.py`'s and
+  `tests/test_sso.py`'s own module docstrings updated to describe this
+  second verification and the real bug it caught, not left claiming
+  "only Google has been tried."
+
+  **What's still not verified**: Okta hasn't been tried, and may have
+  its own further quirks. The Google app is also still in "Testing"
+  publishing status with one whitelisted test user, not
+  verified/published; the Entra ID app registration is a real,
+  fully-functional app, not gated behind that kind of publishing
+  restriction, but hasn't been reviewed for production readiness
+  either (token lifetime policy, conditional access). See
   docs/DEPLOYMENT.md.
 - ⬜ **SCIM provisioning** — not started. Automated user
   provisioning/deprovisioning from an IdP is a distinct protocol
@@ -4511,10 +4573,13 @@ invented encryption/hosting guarantees).
   cases may be mis-flagged. Good enough for a first pass; revisit if real
   user data shows it misfiring.
 - ~~SSO has never been run against a real identity provider~~ — done
-  against a real Google account, see the updated Phase 7 "SSO via OIDC"
-  section above. Okta/Azure AD remain untried (only Google verified so
-  far), and the Google app itself is still in "Testing" publishing
-  status with a single whitelisted test user — see docs/DEPLOYMENT.md.
+  against a real Google account, and (addendum) a second real provider,
+  Microsoft Entra ID — see the updated Phase 7 "SSO via OIDC" section
+  above, including a real cross-provider interop bug that run caught
+  and fixed (Microsoft's ID token omits `email_verified` entirely,
+  unlike Google). Okta remains untried. The Google app itself is still
+  in "Testing" publishing status with a single whitelisted test user —
+  see docs/DEPLOYMENT.md.
 - ~~Personal (non-org) subscription plan changes aren't audit-logged~~ —
   done, see "Post-Phase-7: personal subscription plan changes now
   audit-logged" below.
@@ -4598,7 +4663,11 @@ invented encryption/hosting guarantees).
     real credentials in `apps/api/.env`) — see that section for detail.
     All four of the credential-gated integrations identified at the
     start of Phase 8 (Stripe, the LLM, SMTP, OIDC) are now verified
-    against real accounts.
+    against real accounts. **Addendum**: done a second time against a
+    real Microsoft Entra ID app registration too — see that same
+    section's addendum above, including a real cross-provider interop
+    bug (Microsoft's ID token omits `email_verified` entirely) this
+    pass caught and fixed.
 15. SCIM provisioning, custom/configurable roles, and a real deployment
     manifest for a specific cloud/platform — all scoped out of Phase 7,
     see that section above for why each is a substantial project of its

@@ -6,10 +6,15 @@
    against a FAKE identity provider: we generate our own RSA keypair,
    sign a real ID token with it, and serve a discovery document + token
    endpoint + JWKS endpoint via httpx.MockTransport. This exercises
-   authlib's real JOSE/JWKS validation code for real — the only thing
-   it does NOT prove is that an actual Okta/Azure AD/Google Workspace
-   would interoperate with this code. That remains unverified — see
-   app/services/sso.py's module docstring.
+   authlib's real JOSE/JWKS validation code for real, but a fake
+   provider can only prove the code handles the token *shapes* its
+   author anticipated — not the shapes a real IdP actually sends. Google
+   was verified live in an earlier round; Microsoft Entra ID/Azure AD
+   was verified live in a later one (see docs/CHECKLIST.md), which
+   caught test_accepts_email_when_idp_omits_the_verified_claim_entirely
+   below — a real interop gap no fake-provider test would ever have
+   caught, since the fake provider only ever sent the claim shapes this
+   file's own author assumed. Okta remains unverified.
 """
 
 import time
@@ -59,6 +64,25 @@ async def test_rejects_unverified_email(db_session: AsyncSession) -> None:
         await resolve_or_create_user_from_oidc_claims(
             db_session, {"email": "unverified@example.com", "email_verified": False}
         )
+
+
+async def test_accepts_email_when_idp_omits_the_verified_claim_entirely(db_session: AsyncSession) -> None:
+    """Regression test for a real bug found verifying SSO live against a
+    real Microsoft Entra ID app registration (see docs/CHECKLIST.md):
+    Microsoft's standard v2.0 ID token has no email_verified claim at
+    all under the default `openid email profile` scopes — confirmed by
+    logging the actual raw claims from a real token, not assumed. The
+    original check treated "claim absent" the same as "claim false"
+    (claims.get("email_verified", False)), which Google's tokens never
+    exposed as a problem since Google always sends email_verified
+    explicitly — so no Entra ID/Azure AD login could ever have
+    succeeded until this was caught and fixed. Only an *explicit* false
+    is a red flag (see test_rejects_unverified_email above); an IdP
+    that simply doesn't report the claim is accepted."""
+    claims = {"email": "entra-user@example.com", "name": "Entra User", "sub": "entra-oid-123"}
+    assert "email_verified" not in claims
+    user = await resolve_or_create_user_from_oidc_claims(db_session, claims)
+    assert user.email == "entra-user@example.com"
 
 
 async def test_rejects_missing_email(db_session: AsyncSession) -> None:
