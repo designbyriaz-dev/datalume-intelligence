@@ -4389,6 +4389,74 @@ feature first, then the copy describes what's actually true.
   token is dead (401 on every subsequent request) — proof this works
   outside the test harness too, not only inside it.
 
+## Post-Phase-7: public page content brief (Security + legal pages)
+
+The user gave a real, detailed content brief for the public marketing
+pages — target audience, the core pitch, tone, and (for Security
+specifically) an explicit list of what to cover and an explicit
+instruction not to claim anything unverified (no "fully GDPR
+compliant", no uncertified ISO 27001/Cyber Essentials claims, no
+invented encryption/hosting guarantees).
+
+- ✅ **Features and Solutions pages** — both already existed from an
+  earlier Post-Phase-7 round and were already accurate and in the
+  requested tone; one real staleness found and fixed: the Solutions
+  page listed `reports: []` for the public_sector and education packs,
+  written before this session's own "public sector budget variance
+  report template" and "pupil attendance & performance report
+  template" rounds above — now lists both real reports.
+- ✅ **Security page** — kept every existing section, added the ones
+  the brief named that weren't covered yet: what's collected and why,
+  data isolation (cross-referencing the existing Tenant isolation
+  section rather than repeating it), AI processing (names Anthropic
+  specifically, states what's sent and cites Anthropic's own
+  commercial-API no-training-by-default terms rather than asserting it
+  as DataLume's own guarantee), encryption (R2's real AES-256
+  at-rest encryption — concretely true now that R2 is the real backend,
+  not the generic "whichever provider you pick" hedge this page used
+  to need — alongside an honest "no production host decided yet" for
+  the application itself), hosting and infrastructure, data retention
+  and deletion (this is the section that surfaced the real account/
+  workspace-deletion gap — see "Post-Phase-7: self-serve account and
+  workspace deletion" above, built specifically so this sentence could
+  be true), UK GDPR, incident response, and a real monitored contact
+  address. Explicitly does NOT claim any compliance certification, per
+  the brief.
+- ✅ **`docs/SECURITY.md` corrected again** (last touched in the real
+  malware/AV scanning round — see above): its "encryption at rest...
+  not yet implemented" line was itself now stale once R2 became the
+  real storage backend. Rewritten to state the concrete, now-true fact
+  (R2 encrypts at rest automatically) while keeping the honest caveats
+  that are still genuinely open (database-level encryption depends on
+  the eventual Postgres host; API compute hosting itself still isn't
+  decided).
+- ✅ **Four new legal pages**: `/terms`, `/privacy`, `/cookies`, `/dpa`
+  — real, substantive first drafts grounded in what the product
+  actually does (the real sub-processor list: Anthropic, Cloudflare
+  R2, Stripe, the email provider; the real self-serve deletion
+  capability; the real cookie names and purposes,
+  `refresh_token`/`csrf_token`, both strictly necessary — confirmed no
+  analytics/tracking script exists anywhere in the frontend before
+  writing the Cookie Policy's "no tracking cookies" claim), not
+  placeholder Lorem Ipsum. Every one of the four carries a prominent,
+  impossible-to-miss "Draft — pending legal review, not yet in effect"
+  notice — these are genuine legal documents with real consequences
+  for a real company (DATALUME INTELLIGENCE LTD, now also the entity
+  on file with Stripe Tax — see that section above) once real
+  customers sign up, and this session is not a substitute for a
+  solicitor reviewing them before they're relied upon. Linked from a
+  new legal-links row in `MarketingFooter`.
+- ✅ Frontend typecheck: clean (`tsc --noEmit`). Automated frontend
+  tests: 73/73 passing (no regressions — these pages are static
+  content, nothing new to unit-test beyond what `format.test.ts`
+  already covers).
+- ✅ **Verified live**: started the real Next.js dev server, read each
+  new/changed page's actual rendered text (not just the source),
+  confirmed the Security page's new "Your data" and "Compliance"
+  sections render correctly alongside the pre-existing ones, confirmed
+  the DPA page's draft banner renders prominently, and confirmed the
+  footer's new Terms link resolves to a real route (not a 404).
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -4466,9 +4534,12 @@ feature first, then the copy describes what's actually true.
    updated Phase 3 section above: two real questions, a real
    multi-turn conversation, correct tool calls, correct figures
    verified by hand.
-3. Public-page content (Features, Solutions, Security, legal pages) —
-   content and copy decisions needed from the product owner, not just
-   engineering.
+3. ~~Public-page content (Features, Solutions, Security, legal pages)~~
+   — done, see "Post-Phase-7: public page content brief (Security +
+   legal pages)" below. Features and Solutions already existed from an
+   earlier round and needed only a small factual fix; Security gained
+   real new sections; Terms/Privacy/Cookies/DPA are new, explicitly
+   marked draft-pending-legal-review.
 4. ~~Group-by as a persisted cleaning operation~~ — done, see
    "Post-Phase-7: persisted group-by" above. Every cleaning operation
    the brief named is now built (11 via `_apply_table_transformation`).

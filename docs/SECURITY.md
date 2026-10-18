@@ -55,16 +55,33 @@ aspirational policy. Update it as the implementation changes.
 
 - TLS termination (this is the application's responsibility to require at
   the infrastructure layer, e.g. a load balancer or reverse proxy — not
-  something the application itself provides).
-- Encryption at rest for the database or object storage (inherit this
-  from the managed Postgres / S3-compatible provider you deploy to —
-  don't assume it for granted).
+  something the application itself provides). No production deployment
+  exists yet to point at, so this is a requirement for go-live, not
+  something currently serving real traffic.
+- Encryption at rest for the database — whichever managed Postgres
+  provider this is deployed to must be checked/configured for it; not
+  inherited automatically the way object storage now is (see below).
 - A general audit trail of every ordinary data *read* (who viewed which
   dataset, when, as its own owner) — what exists today (see above)
   covers auth/billing/membership/API-key events and platform-admin
   access specifically, not routine self-access to one's own data.
 - Any compliance certification (ISO 27001, SOC 2, etc.) — none has been
   obtained, and nothing in this codebase should imply otherwise.
+
+## Object storage (updated — this is no longer hypothetical)
+
+Uploaded files and generated reports are stored on Cloudflare R2
+(`app/services/storage.py`'s `S3Storage`, verified against the real
+account — see docs/CHECKLIST.md's "S3Storage verified against real
+Cloudflare R2 bucket" section), in the bucket's Western Europe
+location. R2 encrypts all stored objects at rest automatically
+(AES-256, server-side) with no configuration required on this app's
+part — the same inherit-from-the-provider principle this document
+already applied to encryption at rest generally, now concretely true
+for storage specifically rather than a future "whichever provider you
+pick" caveat. The application itself still has no API compute hosting
+decided or deployed — that part of "hosting and infrastructure" really
+is still open.
 
 ## UK GDPR
 

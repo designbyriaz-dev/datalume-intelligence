@@ -89,7 +89,7 @@ const PACKS: Pack[] = [
       "What's our total budget variance and is it improving or worsening?",
       "What's our current budget utilisation rate?",
     ],
-    reports: [],
+    reports: ["Public Sector Budget Variance Report"],
   },
   {
     name: "Pupil Attendance & Performance",
@@ -105,7 +105,7 @@ const PACKS: Pack[] = [
       "How many students are persistently absent?",
       "Is there an attendance gap between Pupil Premium and other students?",
     ],
-    reports: [],
+    reports: ["Pupil Attendance & Performance Report"],
   },
 ];
 

@@ -98,6 +98,65 @@ const SECTIONS: Section[] = [
       },
     ],
   },
+  {
+    title: "Your data",
+    items: [
+      {
+        title: "What we collect, and why",
+        body:
+          "Your account details (email, name, hashed password), the files you upload, and the questions you ask the AI analyst. We use this to run the product you signed up for — profiling and cleaning your data, computing the KPIs and reports you ask for, and answering your questions — not for anything beyond that.",
+      },
+      {
+        title: "Data isolation",
+        body:
+          "Every workspace, dataset, and report belongs to one account or one organization, and every API endpoint checks that ownership before returning anything — see \"Tenant isolation\" above. Your data is never visible to another customer's account.",
+      },
+      {
+        title: "AI processing",
+        body:
+          "Questions you ask the AI analyst, and the data needed to answer them, are sent to Anthropic's API (Claude) to generate a response. Per Anthropic's own commercial API terms, data submitted through the API is not used to train their models by default. DataLume doesn't send your data to any other third-party AI provider.",
+      },
+      {
+        title: "Encryption",
+        body:
+          "Uploaded files and generated reports are stored on Cloudflare R2, which encrypts everything at rest automatically (AES-256). All traffic to the application is required to run over HTTPS/TLS — enforced at the infrastructure layer a production deployment sits behind, the same as any web application. Database-level encryption at rest depends on whichever managed Postgres provider a deployment uses, and isn't a blanket guarantee from this codebase alone.",
+      },
+      {
+        title: "Hosting and infrastructure",
+        body:
+          "Object storage runs on Cloudflare R2, in its Western Europe location. Where the application itself is hosted isn't finalised yet — this section will be updated with the specific provider and region once that's decided and live, rather than naming one in advance.",
+      },
+      {
+        title: "Data retention and deletion",
+        body:
+          "Delete a workspace at any time — everything in it (datasets, reports, dashboards) is deleted, including the underlying stored files, not just hidden. Delete your whole account from Settings (re-enter your password to confirm) and every workspace you personally own is deleted the same way; anything you contributed to a shared team workspace stays in place for your team, no longer attributed to you. There's no separate backup system beyond what your database/storage provider keeps — version history (see \"Full version history\" above) protects you against your own mistakes, not infrastructure failure.",
+      },
+    ],
+  },
+  {
+    title: "Compliance",
+    items: [
+      {
+        title: "UK GDPR",
+        body:
+          "DataLume Intelligence Ltd is the data controller for your account details, and typically a data processor for the content of files you upload on your organization's behalf. See the Privacy Policy for the full detail, and the Data Processing Agreement if your organization needs one in place.",
+      },
+      {
+        title: "Incident response",
+        body:
+          "If a security incident affecting customer data occurs, we investigate it, take steps to contain it, and notify affected customers directly and without undue delay — not buried in a changelog. We don't currently hold any formal incident-response certification; this describes our actual commitment, not a certified process.",
+      },
+      {
+        title: "No unverified claims",
+        body:
+          "We don't claim certifications we don't hold (ISO 27001, Cyber Essentials, SOC 2) or say \"fully GDPR compliant\" as a blanket marketing phrase. Everything on this page is true of the product today; anything that changes gets updated here, not left stale.",
+      },
+      {
+        title: "Report a security issue",
+        body: "Email designbyriaz@gmail.com directly — every report is read by a real person, not a ticket queue.",
+      },
+    ],
+  },
 ];
 
 export default function SecurityPage() {
