@@ -42,6 +42,6 @@ class AIConversationOut(BaseModel):
     workspace_id: str
     dataset_id: str
     title: str | None
-    created_by_user_id: str
+    created_by_user_id: str | None
     created_at: datetime
     messages: list[AIMessageOut]

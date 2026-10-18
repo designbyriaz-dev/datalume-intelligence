@@ -16,7 +16,7 @@ class AnalysisRunOut(BaseModel):
     operation_type: str
     parameters: dict[str, Any]
     result: dict[str, Any]
-    created_by_user_id: str
+    created_by_user_id: str | None
 
 
 class ToolParameterOut(BaseModel):

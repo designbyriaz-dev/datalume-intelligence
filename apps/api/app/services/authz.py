@@ -53,6 +53,28 @@ async def require_workspace_access(db: AsyncSession, user_id: str, workspace: Wo
     raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Workspace has no owner")
 
 
+async def require_workspace_delete_access(db: AsyncSession, user_id: str, workspace: Workspace) -> None:
+    """Deleting a workspace is irreversible and destroys every dataset,
+    report, and dashboard inside it — reserved for the personal owner,
+    or Owner/Admin roles in an organization workspace (ORG_MANAGE_ROLES,
+    the same bar as organization membership/settings management), not
+    every WORKSPACE_WRITE_ROLES member — an Analyst can upload and clean
+    data but shouldn't be able to delete the whole workspace out from
+    under the rest of the team."""
+    if workspace.owner_user_id is not None:
+        if workspace.owner_user_id != user_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "You do not have access to this workspace")
+        return
+
+    if workspace.organization_id is not None:
+        membership = await require_membership(db, user_id, workspace.organization_id)
+        if MembershipRole(membership.role) not in ORG_MANAGE_ROLES:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Your role does not permit deleting this workspace")
+        return
+
+    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Workspace has no owner")
+
+
 async def require_workspace_write_access(db: AsyncSession, user_id: str, workspace: Workspace) -> None:
     """Like require_workspace_access, but additionally rejects Viewer and
     Auditor members of an organization workspace — they can read data but

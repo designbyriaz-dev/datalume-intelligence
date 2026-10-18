@@ -18,7 +18,12 @@ class Dashboard(UUIDPKMixin, TimestampMixin, Base):
         ForeignKey("dataset_tables.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: this dashboard belongs to its *workspace*
+    # — deleting a contributor's account shouldn't delete a dashboard
+    # they built for a shared team. See app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     widgets: Mapped[list["DashboardWidget"]] = relationship(
         back_populates="dashboard", cascade="all, delete-orphan", order_by="DashboardWidget.position"
@@ -53,7 +58,13 @@ class DashboardComment(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "dashboard_comments"
 
     dashboard_id: Mapped[str] = mapped_column(ForeignKey("dashboards.id", ondelete="CASCADE"), nullable=False)
-    author_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: a comment thread shouldn't vanish because
+    # its author later deleted their account. A null-author comment
+    # simply can no longer be deleted via the "only the author" rule
+    # above — see app/services/account_deletion.py.
+    author_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
     dashboard: Mapped["Dashboard"] = relationship(back_populates="comments")

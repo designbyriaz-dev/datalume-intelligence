@@ -2,13 +2,21 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_object_storage
 from app.db.session import get_db
 from app.models.membership import Membership
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.schemas.workspace import WorkspaceCreate, WorkspaceOut, WorkspaceSettingsUpdate
-from app.services.authz import require_membership, require_workspace_access, require_workspace_write_access
+from app.services.account_deletion import delete_workspace
+from app.services.audit import record_audit_event
+from app.services.authz import (
+    require_membership,
+    require_workspace_access,
+    require_workspace_delete_access,
+    require_workspace_write_access,
+)
+from app.services.storage import ObjectStorage
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
@@ -91,3 +99,36 @@ async def update_workspace_settings(
     await db.commit()
     await db.refresh(workspace)
     return workspace
+
+
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace_endpoint(
+    workspace_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
+) -> None:
+    """Irreversible: deletes the workspace and every dataset, report,
+    dashboard, scheduled report, webhook, and saved scenario inside it —
+    see app/services/account_deletion.py for exactly what cascades and
+    what gets cleaned up in object storage."""
+    workspace = (
+        await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    ).scalar_one_or_none()
+    if workspace is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+
+    await require_workspace_delete_access(db, current_user.id, workspace)
+
+    # Recorded org-scoped (or unscoped for a personal workspace), not
+    # workspace-scoped — a workspace-scoped AuditLog row would itself be
+    # cascade-deleted by the deletion this is recording. Must happen
+    # before delete_workspace, not after.
+    await record_audit_event(
+        db,
+        event_type="workspace.deleted",
+        actor_user_id=current_user.id,
+        organization_id=workspace.organization_id,
+        metadata={"workspace_id": workspace.id, "workspace_name": workspace.name},
+    )
+    await delete_workspace(db, storage, workspace)

@@ -19,6 +19,11 @@ class AnalysisRun(UUIDPKMixin, TimestampMixin, Base):
     operation_type: Mapped[str] = mapped_column(String(100), nullable=False)
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
     result: Mapped[dict] = mapped_column(JSON, nullable=False)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: deleting the user who ran this analysis
+    # shouldn't delete the saved result itself — see
+    # app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     dataset_table: Mapped["DatasetTable"] = relationship()

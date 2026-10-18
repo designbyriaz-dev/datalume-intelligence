@@ -8,4 +8,4 @@ class ReportOut(BaseModel):
     dataset_table_id: str
     report_type: str
     file_size_bytes: int
-    generated_by_user_id: str
+    generated_by_user_id: str | None

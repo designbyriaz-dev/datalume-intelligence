@@ -22,7 +22,13 @@ class Dataset(UUIDPKMixin, TimestampMixin, Base):
 
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: this dataset belongs to its *workspace*
+    # (which does cascade-delete it) — deleting a contributor's account
+    # shouldn't delete datasets they uploaded into someone else's shared
+    # workspace. See app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     versions: Mapped[list["DatasetVersion"]] = relationship(
         back_populates="dataset", cascade="all, delete-orphan", order_by="DatasetVersion.version_number"
@@ -53,7 +59,9 @@ class DatasetVersion(UUIDPKMixin, TimestampMixin, Base):
     )
 
     error_message: Mapped[str | None] = mapped_column(String(2000), nullable=True)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     dataset: Mapped["Dataset"] = relationship(back_populates="versions")
     tables: Mapped[list["DatasetTable"]] = relationship(
@@ -113,4 +121,6 @@ class Transformation(UUIDPKMixin, TimestampMixin, Base):
     result_version_id: Mapped[str] = mapped_column(ForeignKey("dataset_versions.id"), nullable=False)
     operation_type: Mapped[str] = mapped_column(String(100), nullable=False)
     parameters: Mapped[dict] = mapped_column(JSON, nullable=False)
-    performed_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    performed_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )

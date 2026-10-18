@@ -69,6 +69,6 @@ class CommentOut(BaseModel):
 
     id: str
     dashboard_id: str
-    author_user_id: str
+    author_user_id: str | None
     content: str
     created_at: datetime

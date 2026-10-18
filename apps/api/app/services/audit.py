@@ -21,6 +21,12 @@ Currently recorded, and where:
   "customer data access by platform administrators must be ... audited")
 - auth.email_verified          — app/api/v1/routers/auth.py
 - auth.password_reset_completed — app/api/v1/routers/auth.py
+- auth.account_deleted         — app/services/account_deletion.py (actor_user_id
+  goes null the instant this commits, same as every other event for a
+  deleted actor — event_metadata keeps the email as a readable snapshot)
+- workspace.deleted            — app/api/v1/routers/workspaces.py (recorded
+  org-scoped, not workspace-scoped, since a workspace-scoped AuditLog
+  row would itself be cascade-deleted by the very deletion it describes)
 - organization.invite_emailed  — app/api/v1/routers/organizations.py
   (an invite sent to an email with no existing account — distinct from
   organization.member_invited, which is an immediate membership grant
@@ -59,6 +65,8 @@ EVENT_TYPES = {
     "auth.mfa_disabled",
     "auth.mfa_verify_succeeded",
     "auth.mfa_verify_failed",
+    "auth.account_deleted",
+    "workspace.deleted",
 }
 
 

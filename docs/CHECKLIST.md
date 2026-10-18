@@ -4267,6 +4267,128 @@ session feedback has called it out as a concrete near-term need.
   cleaned up afterward by deleting the real objects this run wrote,
   via a direct boto3 call, same as every live check since.
 
+## Post-Phase-7: self-serve account and workspace deletion
+
+Not a pre-existing checklist item — found while preparing to write the
+Security page's new "data retention and deletion" section (the user
+gave a detailed, genuinely rigorous content brief for public marketing
+pages, including "explain how users can delete their files and
+accounts" on the Security page). Checking the real API surface first
+(as every "write accurate security copy" round in this project has),
+there was no DELETE endpoint for a workspace or a user account at
+all — writing that sentence would have been false. Built the real
+feature first, then the copy describes what's actually true.
+
+- 🐛 **A real, previously-invisible bug found and fixed as a
+  prerequisite**: every "who created/authored/generated this"
+  foreign key to `users.id` across 9 models (`Dataset`,
+  `DatasetVersion`, `Transformation`, `AIConversation`, `AnalysisRun`,
+  `Report`, `Dashboard`, `DashboardComment`, `SavedScenario`,
+  `ScheduledReport`, `WebhookSubscription`, plus `AuditLog`) had no
+  `ondelete` action at all — the SQL default, `NO ACTION`. Deleting a
+  `User` row who had ever contributed to a workspace they didn't
+  personally own (an organization's shared workspace) would raise a
+  real `ForeignKeyViolation` against Postgres. SQLite hides this
+  completely: it doesn't enforce foreign keys per-connection unless
+  told to, which this app's engine never did, in the real dev server
+  or the test suite — the third time in this project a real bug was
+  invisible in SQLite and real in Postgres (see "Post-Phase-7: verify
+  the test suite against real Postgres" above for the first two).
+  **Fixed two ways**: every one of those 12 FKs is now
+  `ondelete="SET NULL"` (and nullable) — deleting a user anonymizes
+  content they created elsewhere rather than deleting or orphaning it
+  — via a real Alembic migration
+  (`alembic/versions/1e8b0cec90e4_nullable_creator_fields_for_account_.py`);
+  and `PRAGMA foreign_keys=ON` is now enabled for every SQLite
+  connection this app makes (`app/db/session.py`, `tests/conftest.py`),
+  closing the blind spot itself, not just this one instance of it — any
+  future FK bug like this one will now be caught by SQLite too, not
+  only by the separate real-Postgres CI job.
+- 🐛 **A second real bug found writing the migration itself**: the
+  first version used plain `op.alter_column`/`op.drop_constraint`,
+  which works against Postgres but raises `NotImplementedError`
+  against SQLite (it can't ALTER a constraint in place — Alembic's
+  SQLite dialect requires "batch mode", a create-new-table-copy-swap
+  strategy, for exactly this). Caught by actually running
+  `alembic upgrade head` against a real local SQLite dev database, not
+  just relying on the test suite's `Base.metadata.create_all`, which
+  builds the schema straight from current models and never exercises
+  migration files at all — this migration applying cleanly had never
+  actually been proven until that real run surfaced the error. A third
+  issue surfaced immediately after switching to batch mode: SQLite
+  stores foreign keys completely unnamed (confirmed by reading a real
+  dev.db's own `sqlite_master` DDL directly), so `drop_constraint`
+  still couldn't find a name to target. Fixed with the documented
+  Alembic pattern for this exact situation — a `naming_convention`
+  passed to `batch_alter_table` so SQLite's anonymous constraints get
+  the same deterministic name Postgres already assigns automatically.
+  Verified for real: `alembic upgrade head` (and `downgrade` and
+  `upgrade` again) against both a real local SQLite dev database and a
+  real local Postgres instance, confirming via each database's own
+  real DDL output (`sqlite_master` / Postgres catalogs) that the
+  resulting constraint genuinely says `ON DELETE SET NULL`, not just
+  that the migration command exited 0.
+- ✅ **`app/services/account_deletion.py`** (new) — `delete_workspace`
+  and `delete_own_account`. Every workspace-scoped row cascade-deletes
+  at the DB level once the Workspace row goes (see each model's own
+  FK); object storage doesn't know about that cascade, so every
+  storage key a workspace actually used (`DatasetVersion.storage_key`,
+  `DatasetTable.data_storage_key`, `Report.storage_key`) is collected
+  and best-effort deleted first — a storage-provider outage must not
+  block a user from deleting their own data, same "record, don't
+  crash" principle as `dunning.py`'s Stripe cancellation. Full account
+  deletion additionally best-effort cancels any live Stripe
+  subscription first (reusing `cancel_subscription`, already built for
+  the dunning flow) so Stripe and this app can't end up disagreeing
+  about whether the account is still billed.
+- ✅ **Two new endpoints**: `DELETE /workspaces/{id}` (new
+  `require_workspace_delete_access` in `authz.py` — the personal
+  owner, or Owner/Admin org roles, not every Analyst-level
+  write-access role) and `DELETE /users/me` (requires re-entering the
+  account password in the request body, same re-confirmation pattern
+  as `/auth/mfa/disable` — this is the single most destructive action
+  an account can take on itself). Both record a real audit event
+  first (`workspace.deleted`, `auth.account_deleted` — new
+  `EVENT_TYPES` entries) — a workspace-scoped `AuditLog` row would
+  itself be cascade-deleted by the very deletion it describes, so
+  `workspace.deleted` is recorded organization-scoped (or unscoped for
+  a personal workspace) instead; `auth.account_deleted`'s own
+  `actor_user_id` goes null in the same operation it describes, same
+  as everywhere else, with the user's email kept in `event_metadata`
+  as a readable snapshot.
+- ✅ **7 Pydantic response schemas widened** (`str` → `str | None`) to
+  match the now-nullable model fields they mirror — FastAPI would
+  otherwise raise a real `ResponseValidationError` the first time any
+  of these came back null.
+- ✅ **A real downstream consumer found and fixed**:
+  `scheduled_reports.py`'s email-delivery step looked up the report's
+  creator via `db.get(User, scheduled.created_by_user_id)` to know who
+  to email — unguarded, `None` as a primary key would have been a
+  second latent bug. Now guarded: the schedule still runs and the
+  report still generates with no creator, it just has no one left to
+  email.
+- ✅ Automated backend tests: 411/411 passing, 13 skipped (6 new, in
+  `tests/test_account_deletion.py`) — run three times to prove the
+  point this round is actually about: once against SQLite with FK
+  enforcement now on (the real regression test,
+  `test_deleting_an_analysts_account_preserves_shared_org_content`,
+  only means anything once SQLite stopped silently ignoring the bug),
+  and twice more (the full suite, no regressions either run) to
+  confirm nothing else broke — against SQLite and against a real local
+  Postgres instance.
+- ✅ **Verified live, twice**: once via the real pytest suite against
+  real Postgres (above); once against a genuinely running local API
+  server with a real SQLite database built from real
+  `alembic upgrade head` (not test scaffolding) — registered two real
+  accounts, created a real organization and a real shared workspace,
+  had the non-owner upload a real dataset and run a real analysis in
+  it, deleted that contributor's account for real
+  (`DELETE /users/me` → 204), and confirmed afterward: the shared
+  workspace and the dataset/table the contributor created are both
+  still readable by the owner (200), and the deleted user's old access
+  token is dead (401 on every subsequent request) — proof this works
+  outside the test harness too, not only inside it.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —

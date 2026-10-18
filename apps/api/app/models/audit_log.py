@@ -16,7 +16,12 @@ class AuditLog(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "audit_logs"
 
     event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # SET NULL: an audit entry outlives the user it describes — deleting
+    # an account must not be blocked by, or erase, its own audit trail.
+    # event_metadata on account-deletion-adjacent events snapshots the
+    # user's email/id so the record stays meaningful once this goes
+    # null. See app/services/account_deletion.py.
+    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     organization_id: Mapped[str | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
     )

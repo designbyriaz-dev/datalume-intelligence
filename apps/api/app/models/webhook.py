@@ -23,7 +23,13 @@ class WebhookSubscription(UUIDPKMixin, TimestampMixin, Base):
     secret: Mapped[str] = mapped_column(String(255), nullable=False)
     event_types: Mapped[list] = mapped_column(JSON, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: the webhook belongs to its *workspace* —
+    # deleting the creator's account shouldn't delete a webhook a
+    # shared team's integration still depends on. See
+    # app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     last_delivery_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_delivery_status: Mapped[int | None] = mapped_column(Integer, nullable=True)

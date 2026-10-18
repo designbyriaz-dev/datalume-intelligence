@@ -20,7 +20,12 @@ class AIConversation(UUIDPKMixin, TimestampMixin, Base):
 
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL (not CASCADE): deleting the user who started a
+    # conversation shouldn't delete the conversation itself — see
+    # app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     messages: Mapped[list["AIMessage"]] = relationship(

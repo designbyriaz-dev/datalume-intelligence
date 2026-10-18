@@ -19,5 +19,5 @@ class SavedScenarioOut(BaseModel):
     dataset_table_id: str
     name: str
     adjustments: list[ScenarioAdjustmentIn]
-    created_by_user_id: str
+    created_by_user_id: str | None
     created_at: datetime

@@ -22,6 +22,11 @@ class Report(UUIDPKMixin, TimestampMixin, Base):
     report_type: Mapped[str] = mapped_column(String(100), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(1024), nullable=False)
     file_size_bytes: Mapped[int] = mapped_column(nullable=False)
-    generated_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: this report belongs to its *dataset table*
+    # — deleting the user who generated it shouldn't delete the report
+    # itself. See app/services/account_deletion.py.
+    generated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     dataset_table: Mapped["DatasetTable"] = relationship()

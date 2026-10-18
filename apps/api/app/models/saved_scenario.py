@@ -21,6 +21,11 @@ class SavedScenario(UUIDPKMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     adjustments: Mapped[list] = mapped_column(JSON, nullable=False)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: this scenario belongs to its *workspace* —
+    # deleting its creator's account shouldn't delete a saved scenario
+    # a shared team still relies on. See app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     workspace: Mapped["Workspace"] = relationship()

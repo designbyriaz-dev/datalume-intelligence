@@ -71,7 +71,7 @@ class DatasetOut(BaseModel):
     id: str
     workspace_id: str
     name: str
-    created_by_user_id: str
+    created_by_user_id: str | None
 
 
 class DatasetDetailOut(DatasetOut):
@@ -169,4 +169,4 @@ class TransformationOut(BaseModel):
     parameters: dict[str, Any]
     source_version_id: str
     result_version_id: str
-    performed_by_user_id: str
+    performed_by_user_id: str | None

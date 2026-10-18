@@ -77,3 +77,7 @@ class MfaEnableRequest(BaseModel):
 
 class MfaDisableRequest(BaseModel):
     password: str
+
+
+class AccountDeletionRequest(BaseModel):
+    password: str

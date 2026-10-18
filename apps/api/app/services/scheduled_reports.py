@@ -274,8 +274,12 @@ async def _run_due_scheduled_reports_locked(
             # field means "generation failed" — mixing delivery failures
             # into it would make the schedule look broken when it isn't).
             # Mirrors WebhookSubscription.last_delivery_error's
-            # record-don't-crash approach.
-            recipient = await db.get(User, scheduled.created_by_user_id)
+            # record-don't-crash approach. created_by_user_id can now be
+            # None (the creator deleted their account — see
+            # app/services/account_deletion.py — the schedule itself
+            # survives, it just has no one left to email): guard the
+            # lookup rather than pass None as a primary key.
+            recipient = await db.get(User, scheduled.created_by_user_id) if scheduled.created_by_user_id else None
             if recipient is not None:
                 report_label = scheduled.report_type.replace("_", " ").title()
                 try:

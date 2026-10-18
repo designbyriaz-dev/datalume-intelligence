@@ -35,6 +35,13 @@ class ScheduledReport(UUIDPKMixin, TimestampMixin, Base):
     last_email_error: Mapped[str | None] = mapped_column(String(2000), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # SET NULL, not CASCADE: the schedule belongs to its *workspace* —
+    # deleting the creator's account shouldn't delete a schedule a
+    # shared team still relies on. Once null, run_due_scheduled_reports
+    # still generates the report but has no one to email it to — see
+    # app/services/account_deletion.py.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     workspace: Mapped["Workspace"] = relationship()
