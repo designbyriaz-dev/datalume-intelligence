@@ -148,7 +148,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">13. Contact</h2>
             <p className="mt-3">
-              Questions about these terms: designbyriaz@gmail.com.
+              Questions about these terms: riaz@datalume.co.uk.
             </p>
           </section>
         </div>

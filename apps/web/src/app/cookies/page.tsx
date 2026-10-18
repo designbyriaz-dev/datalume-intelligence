@@ -67,7 +67,7 @@ export default function CookiesPage() {
             <Link href="/privacy" className="text-brand-500 hover:underline">
               Privacy Policy
             </Link>{" "}
-            or email designbyriaz@gmail.com.
+            or email riaz@datalume.co.uk.
           </p>
         </div>
       </div>

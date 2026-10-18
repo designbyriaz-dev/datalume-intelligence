@@ -117,7 +117,7 @@ export default function DpaPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">9. Contact</h2>
             <p className="mt-3">
-              To discuss or request a countersigned version of this agreement: designbyriaz@gmail.com.
+              To discuss or request a countersigned version of this agreement: riaz@datalume.co.uk.
             </p>
           </section>
         </div>

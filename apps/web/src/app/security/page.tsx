@@ -153,7 +153,7 @@ const SECTIONS: Section[] = [
       },
       {
         title: "Report a security issue",
-        body: "Email designbyriaz@gmail.com directly — every report is read by a real person, not a ticket queue.",
+        body: "Email riaz@datalume.co.uk directly — every report is read by a real person, not a ticket queue.",
       },
     ],
   },

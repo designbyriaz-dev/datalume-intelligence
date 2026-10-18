@@ -144,7 +144,7 @@ export default function PrivacyPage() {
               <li>receive your data in a portable format.</li>
             </ul>
             <p className="mt-3">
-              To exercise any of these, email designbyriaz@gmail.com. You can also complain to the
+              To exercise any of these, email riaz@datalume.co.uk. You can also complain to the
               UK&rsquo;s Information Commissioner&rsquo;s Office (ico.org.uk) if you think
               we&rsquo;ve handled your data wrongly.
             </p>
@@ -179,7 +179,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Contact</h2>
             <p className="mt-3">
-              Questions about this policy, or to exercise any of your rights above: designbyriaz@gmail.com.
+              Questions about this policy, or to exercise any of your rights above: riaz@datalume.co.uk.
             </p>
           </section>
         </div>
