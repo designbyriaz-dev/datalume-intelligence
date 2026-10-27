@@ -38,9 +38,12 @@ the strict one. See docs/DEPLOYMENT.md.
 from __future__ import annotations
 
 import abc
+import logging
 from pathlib import Path
 
 from app.core.config import Settings, get_settings
+
+logger = logging.getLogger("datalume.storage")
 
 
 class StorageError(Exception):
@@ -159,3 +162,17 @@ def get_storage() -> ObjectStorage:
 def reset_storage_for_tests() -> None:
     global _storage_instance
     _storage_instance = None
+
+
+def delete_keys_best_effort(storage: ObjectStorage, keys: list[str]) -> None:
+    """Deletes each key, logging (not raising) on failure — used
+    wherever a DB-level cascade delete (a workspace, a property, ...)
+    needs its orphaned storage objects cleaned up too; a storage
+    provider outage must never block a deletion the caller has already
+    committed to. See app/services/account_deletion.py for the original
+    use of this pattern."""
+    for key in keys:
+        try:
+            storage.delete(key)
+        except Exception as exc:  # noqa: BLE001 - a storage failure must never block deletion
+            logger.warning("Failed to delete storage object %s: %s", key, exc)

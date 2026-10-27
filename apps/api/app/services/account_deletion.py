@@ -31,11 +31,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing import Subscription
 from app.models.dataset import Dataset, DatasetTable, DatasetVersion
+from app.models.document import Document
+from app.models.property import Property
 from app.models.report import Report
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.services.audit import record_audit_event
-from app.services.storage import ObjectStorage
+from app.services.storage import ObjectStorage, delete_keys_best_effort
 
 logger = logging.getLogger("datalume.account_deletion")
 
@@ -68,15 +70,15 @@ async def _collect_workspace_storage_keys(db: AsyncSession, workspace_id: str) -
         )
     ).scalars().all()
 
-    return [k for k in (*version_keys, *table_keys, *report_keys) if k]
+    document_keys = (
+        await db.execute(
+            select(Document.storage_key)
+            .join(Property, Property.id == Document.property_id)
+            .where(Property.workspace_id == workspace_id)
+        )
+    ).scalars().all()
 
-
-def _delete_storage_keys_best_effort(storage: ObjectStorage, keys: list[str]) -> None:
-    for key in keys:
-        try:
-            storage.delete(key)
-        except Exception as exc:  # noqa: BLE001 - a storage failure must never block deletion
-            logger.warning("Failed to delete storage object %s during deletion: %s", key, exc)
+    return [k for k in (*version_keys, *table_keys, *report_keys, *document_keys) if k]
 
 
 async def delete_workspace(db: AsyncSession, storage: ObjectStorage, workspace: Workspace) -> None:
@@ -88,7 +90,7 @@ async def delete_workspace(db: AsyncSession, storage: ObjectStorage, workspace: 
     organization-scoped or unscoped, not workspace-scoped, and has to
     exist before this runs, not after."""
     keys = await _collect_workspace_storage_keys(db, workspace.id)
-    _delete_storage_keys_best_effort(storage, keys)
+    delete_keys_best_effort(storage, keys)
 
     await db.delete(workspace)
     await db.commit()
@@ -118,7 +120,7 @@ async def delete_own_account(db: AsyncSession, storage: ObjectStorage, user: Use
     ).scalars().all()
     for workspace_id in owned_workspace_ids:
         keys = await _collect_workspace_storage_keys(db, workspace_id)
-        _delete_storage_keys_best_effort(storage, keys)
+        delete_keys_best_effort(storage, keys)
 
     await record_audit_event(
         db,

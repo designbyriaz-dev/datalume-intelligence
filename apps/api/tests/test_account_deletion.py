@@ -71,10 +71,24 @@ async def test_delete_workspace_removes_data_and_storage_objects(
     )
     assert gen_resp.status_code == 201, gen_resp.text
 
+    prop_resp = await client.post(
+        f"/api/v1/workspaces/{workspace_id}/properties",
+        json={"address_line1": "1 Deletion Test St", "city": "York", "postcode": "YO1 1AA"},
+        headers=_auth(token),
+    )
+    property_id = prop_resp.json()["id"]
+    doc_resp = await client.post(
+        f"/api/v1/properties/{property_id}/documents",
+        data={"title": "EPC", "document_type": "epc"},
+        files={"file": ("epc.pdf", b"%PDF-1.4\nmock", "application/pdf")},
+        headers=_auth(token),
+    )
+    assert doc_resp.status_code == 201, doc_resp.text
+
     # Confirm the storage objects genuinely exist on disk before deleting.
     stored_files = list(test_storage.base_dir.rglob("*"))
     data_files = [p for p in stored_files if p.is_file()]
-    assert len(data_files) >= 2, "expected at least the uploaded source file and the generated report"
+    assert len(data_files) >= 3, "expected the uploaded source file, the generated report, and the document"
 
     delete_resp = await client.delete(f"/api/v1/workspaces/{workspace_id}", headers=_auth(token))
     assert delete_resp.status_code == 204, delete_resp.text

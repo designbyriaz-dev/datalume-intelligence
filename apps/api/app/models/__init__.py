@@ -11,6 +11,7 @@ from app.models.dataset import (
     DatasetVersionStatus,
     Transformation,
 )
+from app.models.document import Document, DocumentType
 from app.models.email_token import EmailToken, EmailTokenPurpose
 from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
@@ -65,4 +66,6 @@ __all__ = [
     "RentFrequency",
     "RentLedgerEntry",
     "LedgerEntryType",
+    "Document",
+    "DocumentType",
 ]

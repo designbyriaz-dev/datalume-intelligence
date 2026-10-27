@@ -5,9 +5,233 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
-import { api, ApiError, type Property, type RentLedgerEntry, type Tenancy, type TenancyBalance } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  type DocumentType,
+  type Property,
+  type PropertyDocument,
+  type RentLedgerEntry,
+  type Tenancy,
+  type TenancyBalance,
+} from "@/lib/api";
 
 const LEDGER_ENTRY_TYPES: RentLedgerEntry["entry_type"][] = ["charge", "payment", "adjustment", "refund"];
+
+const DOCUMENT_TYPES: DocumentType[] = [
+  "tenancy_agreement",
+  "gas_safety_certificate",
+  "eicr",
+  "epc",
+  "deposit_protection_certificate",
+  "right_to_rent_check",
+  "insurance_certificate",
+  "inventory_report",
+  "other",
+];
+
+function formatDocumentType(type: DocumentType): string {
+  return type.replace(/_/g, " ");
+}
+
+function DocumentsPanel({ propertyId, tenancies, token }: { propertyId: string; tenancies: Tenancy[]; token: string }) {
+  const [documents, setDocuments] = useState<PropertyDocument[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [file, setFile] = useState<File | null>(null);
+  const [title, setTitle] = useState("");
+  const [documentType, setDocumentType] = useState<DocumentType>("other");
+  const [tenancyId, setTenancyId] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setDocuments(await api.listDocuments(token, propertyId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load documents.");
+      setDocuments([]);
+    }
+  }, [token, propertyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const onUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file || !title) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await api.uploadDocument(token, propertyId, file, {
+        title,
+        document_type: documentType,
+        tenancy_id: tenancyId || undefined,
+        expiry_date: expiryDate || undefined,
+      });
+      setFile(null);
+      setTitle("");
+      setExpiryDate("");
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not upload document.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const onDownload = async (doc: PropertyDocument) => {
+    try {
+      const blob = await api.downloadDocument(token, doc.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not download document.");
+    }
+  };
+
+  const onDelete = async (documentId: string) => {
+    setDeletingId(documentId);
+    setError(null);
+    try {
+      await api.deleteDocument(token, documentId);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete document.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="mt-10">
+      <h2 className="font-medium">Documents</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Certificates, agreements and photos for this property. PDF, JPG/PNG or DOCX, no payment/compliance
+        checking happens here yet.
+      </p>
+
+      <form onSubmit={onUpload} className="mt-3 space-y-2 rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1">
+            <label className="block text-xs font-medium">Title</label>
+            <input
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Gas safety certificate 2026"
+              className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium">Type</label>
+            <select
+              value={documentType}
+              onChange={(e) => setDocumentType(e.target.value as DocumentType)}
+              className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              {DOCUMENT_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {formatDocumentType(t)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {tenancies.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium">Tenancy</label>
+              <select
+                value={tenancyId}
+                onChange={(e) => setTenancyId(e.target.value)}
+                className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+              >
+                <option value="">Property-level</option>
+                {tenancies.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.tenant_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium">Expiry (optional)</label>
+            <input
+              type="date"
+              value={expiryDate}
+              onChange={(e) => setExpiryDate(e.target.value)}
+              className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium">File</label>
+            <input
+              required
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.docx"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="mt-1 text-sm"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={uploading}
+            className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          >
+            {uploading ? "Uploading…" : "Upload"}
+          </button>
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </form>
+
+      <div className="mt-3">
+        {documents === null ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : documents.length === 0 ? (
+          <p className="text-sm text-slate-500">No documents yet.</p>
+        ) : (
+          <ul className="space-y-1">
+            {documents.map((doc) => (
+              <li
+                key={doc.id}
+                className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900"
+              >
+                <div>
+                  <div className="font-medium">{doc.title}</div>
+                  <div className="text-xs text-slate-500">
+                    {formatDocumentType(doc.document_type)}
+                    {doc.tenancy_id && " · tenancy-specific"}
+                    {doc.expiry_date && ` · expires ${new Date(doc.expiry_date).toLocaleDateString()}`}
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 gap-3 text-xs">
+                  <button onClick={() => onDownload(doc)} className="text-brand-500 hover:underline">
+                    Download
+                  </button>
+                  <button
+                    onClick={() => onDelete(doc.id)}
+                    disabled={deletingId === doc.id}
+                    className="text-slate-400 hover:text-red-500 disabled:opacity-50"
+                  >
+                    {deletingId === doc.id ? "Removing…" : "Delete"}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
   const [entries, setEntries] = useState<RentLedgerEntry[] | null>(null);
@@ -353,6 +577,8 @@ export default function PropertyDetailPage() {
             tenancies.map((t) => <TenancyCard key={t.id} tenancy={t} token={token!} />)
           )}
         </div>
+
+        <DocumentsPanel propertyId={propertyId} tenancies={tenancies ?? []} token={token!} />
       </div>
     </main>
   );

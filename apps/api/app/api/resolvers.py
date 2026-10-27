@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import Dashboard
 from app.models.dataset import Dataset, DatasetTable, DatasetVersion
+from app.models.property import Property, Tenancy
 from app.models.workspace import Workspace
 
 
@@ -50,3 +51,21 @@ async def get_dashboard_chain_or_404(db: AsyncSession, dashboard_id: str) -> tup
     if workspace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
     return dashboard, workspace
+
+
+async def get_property_chain_or_404(db: AsyncSession, property_id: str) -> tuple[Property, Workspace]:
+    property_ = await db.get(Property, property_id)
+    if property_ is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Property not found")
+    workspace = await db.get(Workspace, property_.workspace_id)
+    if workspace is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
+    return property_, workspace
+
+
+async def get_tenancy_chain_or_404(db: AsyncSession, tenancy_id: str) -> tuple[Tenancy, Property, Workspace]:
+    tenancy = await db.get(Tenancy, tenancy_id)
+    if tenancy is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenancy not found")
+    property_, workspace = await get_property_chain_or_404(db, tenancy.property_id)
+    return tenancy, property_, workspace

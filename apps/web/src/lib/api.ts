@@ -183,6 +183,30 @@ export interface PropertyKPIs {
   arrears_count: number;
 }
 
+export type DocumentType =
+  | "tenancy_agreement"
+  | "gas_safety_certificate"
+  | "eicr"
+  | "epc"
+  | "deposit_protection_certificate"
+  | "right_to_rent_check"
+  | "insurance_certificate"
+  | "inventory_report"
+  | "other";
+
+export interface PropertyDocument {
+  id: string;
+  property_id: string;
+  tenancy_id: string | null;
+  document_type: DocumentType;
+  title: string;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+  expiry_date: string | null;
+  uploaded_by_user_id: string | null;
+}
+
 export interface ColumnProfile {
   name: string;
   inferred_type: string;
@@ -1211,4 +1235,39 @@ export const api = {
 
   getTenancyBalance: (token: string, tenancyId: string) =>
     request<TenancyBalance>(`/api/v1/tenancies/${tenancyId}/balance`, {}, token),
+
+  listDocuments: (token: string, propertyId: string, tenancyId?: string) =>
+    request<PropertyDocument[]>(
+      `/api/v1/properties/${propertyId}/documents${tenancyId ? `?tenancy_id=${tenancyId}` : ""}`,
+      {},
+      token
+    ),
+
+  uploadDocument: (
+    token: string,
+    propertyId: string,
+    file: File,
+    payload: { title: string; document_type: DocumentType; tenancy_id?: string; expiry_date?: string }
+  ) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("title", payload.title);
+    formData.append("document_type", payload.document_type);
+    if (payload.tenancy_id) formData.append("tenancy_id", payload.tenancy_id);
+    if (payload.expiry_date) formData.append("expiry_date", payload.expiry_date);
+    return requestMultipart<PropertyDocument>(`/api/v1/properties/${propertyId}/documents`, formData, token);
+  },
+
+  deleteDocument: (token: string, documentId: string) =>
+    request<void>(`/api/v1/documents/${documentId}`, { method: "DELETE" }, token),
+
+  downloadDocument: async (token: string, documentId: string): Promise<Blob> => {
+    const res = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/download`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new ApiError(res.status, "Could not download document.");
+    }
+    return res.blob();
+  },
 };

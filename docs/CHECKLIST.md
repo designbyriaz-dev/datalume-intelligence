@@ -4624,6 +4624,92 @@ particular remains blocked on the user selecting a payment provider
 the regulatory shape that choice implies, exactly as the brief itself
 requires.
 
+## Post-Phase-7: property documents (Phase 2, first slice, of the property-management brief)
+
+The first slice of Phase 2 (Documents, Inventories, Maintenance,
+Compliance engine — see the Phase 1 section above for the full
+property-management brief phasing). Documents specifically, since
+Inventories, Maintenance, and the Compliance engine are all meant to
+build on it (a compliance check like "is there a valid, non-expired gas
+safety certificate" needs documents with types and expiry dates to exist
+first) — see the plan's own reasoning for taking Documents first within
+Phase 2.
+
+- ✅ **New model** (`app/models/document.py`): `Document` — scoped to a
+  `Property` (`ondelete=CASCADE`, the same nesting pattern `Tenancy`
+  already uses) and optionally to one specific `Tenancy` within it
+  (nullable `tenancy_id` — null means the document applies to the
+  property itself, e.g. an EPC or buildings insurance, regardless of who
+  the current tenant is). `document_type` is a constrained enum covering
+  the real UK lettings-compliance document types (gas safety
+  certificate, EICR, EPC, deposit protection certificate, right-to-rent
+  check, insurance certificate, inventory report, tenancy agreement,
+  other) — unlike `Property.property_type`, this one needs a known
+  vocabulary since a future compliance rule will match on it by name.
+  `expiry_date` is stored (not yet evaluated — that's the compliance
+  engine's job) since most of these document types carry a real
+  statutory renewal date.
+- ✅ **Reused the existing `ObjectStorage` abstraction** (R2/S3/local
+  disk — the same backend dataset uploads already use) rather than
+  building a second storage path — this is a new kind of row pointing
+  into the same object store, not a new storage backend.
+- ✅ **A separate upload validator** (`app/services/document_validation.py`),
+  not a loosened version of `app/services/upload_validation.py` — that
+  module's `.csv`/`.xlsx`-only allow-list is deliberately strict for
+  dataset ingestion; documents need their own allow-list (`.pdf`, `.jpg`/
+  `.jpeg`, `.png`, `.docx`) with their own magic-byte signature checks
+  and their own zip-bomb/macro guard for `.docx` (mirroring the existing
+  `.xlsx` guard). Reuses the existing malware-scanning hook
+  (`app/services/malware_scanning.py`) unchanged — that module was
+  already format-agnostic.
+- ✅ **API** (`app/api/v1/routers/documents.py`): upload (multipart,
+  property-scoped with an optional tenancy filter), list, get, download
+  (streams the real bytes back with the right content type), and delete.
+  Added two shared resolvers to `app/api/resolvers.py`
+  (`get_property_chain_or_404`, `get_tenancy_chain_or_404`) rather than
+  duplicating the lookup-or-404 logic a third time.
+- ✅ **Real orphaned-storage gap found and fixed**: deleting a `Property`
+  (or a whole workspace, or a whole account) already cascade-deletes
+  `Document` rows at the DB level, but nothing was cleaning up the
+  actual files in object storage — the exact failure mode
+  `app/services/account_deletion.py`'s module docstring already
+  describes for datasets/reports, just not yet closed for documents
+  since they didn't exist until this round. Fixed by extracting that
+  module's storage-cleanup helper into a shared
+  `app/services/storage.py:delete_keys_best_effort` and using it in two
+  places: `account_deletion.py`'s existing workspace/account storage
+  collection (now also collects `Document.storage_key` via a `Property`
+  join) and a new storage-key collection step in
+  `properties.py`'s `delete_property` endpoint. Caught by a real test
+  (`test_deleting_property_removes_document_storage_objects`) asserting
+  zero files remain on disk after deletion, the same assertion style
+  `test_account_deletion.py`'s existing storage test already uses —
+  not assumed to work from the cascade alone.
+- ✅ **Tests**: `tests/test_document_validation.py` (real PDF/JPEG/PNG/
+  DOCX magic-byte acceptance, disguised-file rejection, a macro-enabled
+  `.docx` rejection, an empty/oversized-file rejection) and
+  `tests/test_documents.py` (upload, download round-trips the exact
+  original bytes, tenancy scoping and cross-property tenancy_id
+  rejection, tenant isolation, property-delete cascade, and the
+  storage-cleanup test above). Full backend suite run clean against
+  **both** SQLite and real Postgres.
+- ✅ **Frontend**: a Documents panel added to the property detail page
+  (`apps/web/src/app/dashboard/workspaces/[id]/properties/[propertyId]/page.tsx`)
+  — upload form (title, type, optional tenancy, optional expiry date,
+  file picker restricted to the supported extensions), and a list with
+  download/delete per document.
+- ✅ **Verified live**: uploaded a real PDF (a gas safety certificate,
+  with an expiry date) through the real running frontend against the
+  real running backend, confirmed it appeared correctly in the list with
+  its type and expiry date, and confirmed Download actually returns the
+  file (a real `200 OK` network request, not just a UI appearance).
+
+**Explicitly not started**: Inventories, Maintenance requests, and the
+Compliance-rules engine (the rest of Phase 2 — Documents was taken first
+specifically so these have real document rows with real types/expiry
+dates to build against) — same honest "not an oversight" flag the Phase
+1 section above uses for what it deferred.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -4802,3 +4888,8 @@ requires.
     inventories, maintenance, the compliance-rules engine, a tenant
     portal, the brief's new public pages, and the brief's proposed
     pricing/tier restructure.
+19. ~~**Property documents**~~ — done (first slice of Phase 2), see
+    "Post-Phase-7: property documents (Phase 2, first slice, of the
+    property-management brief)" above. Still open: Inventories,
+    Maintenance requests, and the Compliance-rules engine (the rest of
+    Phase 2), plus everything already listed as open in item 18 above.

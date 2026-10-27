@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_object_storage
 from app.api.resolvers import get_workspace_or_404
 from app.db.session import get_db
+from app.models.document import Document
 from app.models.property import Property, RentLedgerEntry, Tenancy
 from app.models.user import User
 from app.schemas.property import (
@@ -23,6 +24,7 @@ from app.schemas.property import (
 )
 from app.services.authz import require_workspace_access, require_workspace_delete_access, require_workspace_write_access
 from app.services.property_kpis import compute_portfolio_kpis, compute_tenancy_balance
+from app.services.storage import ObjectStorage, delete_keys_best_effort
 
 router = APIRouter(tags=["properties"])
 
@@ -153,13 +155,25 @@ async def delete_property(
     property_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    storage: ObjectStorage = Depends(get_object_storage),
 ) -> None:
     property_ = await _get_property_or_404(db, property_id)
     workspace = await get_workspace_or_404(db, property_.workspace_id)
     await require_workspace_delete_access(db, current_user.id, workspace)
 
+    # Documents cascade-delete at the DB level (Document.property_id's
+    # ondelete="CASCADE") but object storage doesn't know about that —
+    # same reasoning as app/services/account_deletion.py, which this
+    # mirrors: collect every storage key this property's documents used
+    # before the DB delete removes the rows that point to them.
+    document_keys = (
+        await db.execute(select(Document.storage_key).where(Document.property_id == property_id))
+    ).scalars().all()
+
     await db.delete(property_)
     await db.commit()
+
+    delete_keys_best_effort(storage, [k for k in document_keys if k])
 
 
 @router.post(

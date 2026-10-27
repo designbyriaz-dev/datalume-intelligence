@@ -9,6 +9,7 @@ from app.api.v1.routers import (
     billing,
     dashboards,
     datasets,
+    documents,
     health,
     industry,
     organizations,
@@ -42,3 +43,4 @@ api_router.include_router(webhooks.router)
 api_router.include_router(sso.router)
 api_router.include_router(saved_scenarios.router)
 api_router.include_router(properties.router)
+api_router.include_router(documents.router)
