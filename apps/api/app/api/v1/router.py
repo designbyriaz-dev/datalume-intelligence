@@ -12,6 +12,7 @@ from app.api.v1.routers import (
     health,
     industry,
     organizations,
+    properties,
     reports,
     saved_scenarios,
     scheduled_reports,
@@ -40,3 +41,4 @@ api_router.include_router(admin.router)
 api_router.include_router(webhooks.router)
 api_router.include_router(sso.router)
 api_router.include_router(saved_scenarios.router)
+api_router.include_router(properties.router)

@@ -2512,6 +2512,12 @@ export default function WorkspaceDetailPage() {
           <>
             <p className="mt-1 text-sm text-slate-500">{workspace.industry.replace(/_/g, " ")}</p>
             {token && <KpiWindowSetting workspace={workspace} token={token} onChanged={setWorkspace} />}
+            <Link
+              href={`/dashboard/workspaces/${workspaceId}/properties`}
+              className="mt-2 inline-block text-sm text-brand-500 hover:underline"
+            >
+              Properties & rent ledger →
+            </Link>
           </>
         )}
 

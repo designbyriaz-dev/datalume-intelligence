@@ -14,6 +14,7 @@ from app.models.dataset import (
 from app.models.email_token import EmailToken, EmailTokenPurpose
 from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
+from app.models.property import LedgerEntryType, Property, RentFrequency, RentLedgerEntry, Tenancy, TenancyStatus
 from app.models.rate_limit import RateLimitWindow
 from app.models.report import Report
 from app.models.saved_scenario import SavedScenario
@@ -58,4 +59,10 @@ __all__ = [
     "EmailToken",
     "EmailTokenPurpose",
     "RateLimitWindow",
+    "Property",
+    "Tenancy",
+    "TenancyStatus",
+    "RentFrequency",
+    "RentLedgerEntry",
+    "LedgerEntryType",
 ]

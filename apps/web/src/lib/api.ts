@@ -134,6 +134,55 @@ export interface Workspace {
   kpi_window_months: number | null;
 }
 
+export interface Property {
+  id: string;
+  workspace_id: string;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  postcode: string;
+  country: string;
+  property_type: string | null;
+  created_by_user_id: string | null;
+}
+
+export interface Tenancy {
+  id: string;
+  property_id: string;
+  tenant_name: string;
+  tenant_email: string | null;
+  rent_amount_gbp: number;
+  rent_frequency: "weekly" | "monthly" | "quarterly";
+  start_date: string;
+  end_date: string | null;
+  status: "upcoming" | "active" | "ended";
+  created_by_user_id: string | null;
+}
+
+export interface RentLedgerEntry {
+  id: string;
+  tenancy_id: string;
+  entry_type: "charge" | "payment" | "adjustment" | "refund";
+  amount_gbp: number;
+  entry_date: string;
+  description: string | null;
+  created_by_user_id: string | null;
+}
+
+export interface TenancyBalance {
+  tenancy_id: string;
+  balance_gbp: number;
+}
+
+export interface PropertyKPIs {
+  total_properties: number;
+  active_tenancies: number;
+  expected_monthly_rent_gbp: number;
+  collected_this_period_gbp: number;
+  outstanding_balance_gbp: number;
+  arrears_count: number;
+}
+
 export interface ColumnProfile {
   name: string;
   inferred_type: string;
@@ -1086,4 +1135,80 @@ export const api = {
 
   deleteScheduledReport: (token: string, scheduledReportId: string) =>
     request<void>(`/api/v1/scheduled-reports/${scheduledReportId}`, { method: "DELETE" }, token),
+
+  listProperties: (token: string, workspaceId: string) =>
+    request<Property[]>(`/api/v1/workspaces/${workspaceId}/properties`, {}, token),
+
+  getPropertyKpis: (token: string, workspaceId: string) =>
+    request<PropertyKPIs>(`/api/v1/workspaces/${workspaceId}/properties/kpis`, {}, token),
+
+  createProperty: (
+    token: string,
+    workspaceId: string,
+    payload: {
+      address_line1: string;
+      address_line2?: string;
+      city: string;
+      postcode: string;
+      country?: string;
+      property_type?: string;
+    }
+  ) =>
+    request<Property>(
+      `/api/v1/workspaces/${workspaceId}/properties`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  getProperty: (token: string, propertyId: string) =>
+    request<Property>(`/api/v1/properties/${propertyId}`, {}, token),
+
+  deleteProperty: (token: string, propertyId: string) =>
+    request<void>(`/api/v1/properties/${propertyId}`, { method: "DELETE" }, token),
+
+  listTenancies: (token: string, propertyId: string) =>
+    request<Tenancy[]>(`/api/v1/properties/${propertyId}/tenancies`, {}, token),
+
+  createTenancy: (
+    token: string,
+    propertyId: string,
+    payload: {
+      tenant_name: string;
+      tenant_email?: string;
+      rent_amount_gbp: number;
+      rent_frequency?: "weekly" | "monthly" | "quarterly";
+      start_date: string;
+      end_date?: string;
+      status?: "upcoming" | "active" | "ended";
+    }
+  ) =>
+    request<Tenancy>(
+      `/api/v1/properties/${propertyId}/tenancies`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  updateTenancy: (token: string, tenancyId: string, status: Tenancy["status"], endDate?: string) =>
+    request<Tenancy>(
+      `/api/v1/tenancies/${tenancyId}`,
+      { method: "PATCH", body: JSON.stringify({ status, end_date: endDate ?? null }) },
+      token
+    ),
+
+  listLedgerEntries: (token: string, tenancyId: string) =>
+    request<RentLedgerEntry[]>(`/api/v1/tenancies/${tenancyId}/ledger-entries`, {}, token),
+
+  createLedgerEntry: (
+    token: string,
+    tenancyId: string,
+    payload: { entry_type: RentLedgerEntry["entry_type"]; amount_gbp: number; entry_date: string; description?: string }
+  ) =>
+    request<RentLedgerEntry>(
+      `/api/v1/tenancies/${tenancyId}/ledger-entries`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  getTenancyBalance: (token: string, tenancyId: string) =>
+    request<TenancyBalance>(`/api/v1/tenancies/${tenancyId}/balance`, {}, token),
 };
