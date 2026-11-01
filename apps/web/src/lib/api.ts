@@ -265,6 +265,41 @@ export interface MaintenanceRequest {
   created_by_user_id: string | null;
 }
 
+export type ComplianceCheckType = "document_required";
+
+export interface ComplianceRule {
+  id: string;
+  workspace_id: string;
+  name: string;
+  check_type: ComplianceCheckType;
+  document_type: DocumentType | null;
+  requires_non_expired: boolean;
+  warning_window_days: number;
+  is_active: boolean;
+  created_by_user_id: string | null;
+}
+
+export type ComplianceStatus =
+  | "passes"
+  | "potential_issue"
+  | "missing_information"
+  | "action_may_be_overdue"
+  | "requires_human_review"
+  | "unable_to_determine";
+
+export interface ComplianceCheckResult {
+  rule_id: string;
+  rule_name: string;
+  status: ComplianceStatus;
+  detail: string;
+  matched_document_id: string | null;
+}
+
+export interface PropertyCompliance {
+  property_id: string;
+  checks: ComplianceCheckResult[];
+}
+
 export interface ColumnProfile {
   name: string;
   inferred_type: string;
@@ -1391,4 +1426,47 @@ export const api = {
 
   deleteMaintenanceRequest: (token: string, requestId: string) =>
     request<void>(`/api/v1/maintenance-requests/${requestId}`, { method: "DELETE" }, token),
+
+  listComplianceRules: (token: string, workspaceId: string) =>
+    request<ComplianceRule[]>(`/api/v1/workspaces/${workspaceId}/compliance-rules`, {}, token),
+
+  createComplianceRule: (
+    token: string,
+    workspaceId: string,
+    payload: {
+      name: string;
+      document_type: DocumentType;
+      requires_non_expired?: boolean;
+      warning_window_days?: number;
+      is_active?: boolean;
+    }
+  ) =>
+    request<ComplianceRule>(
+      `/api/v1/workspaces/${workspaceId}/compliance-rules`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  updateComplianceRule: (
+    token: string,
+    ruleId: string,
+    payload: {
+      name: string;
+      document_type: DocumentType;
+      requires_non_expired: boolean;
+      warning_window_days: number;
+      is_active: boolean;
+    }
+  ) =>
+    request<ComplianceRule>(
+      `/api/v1/compliance-rules/${ruleId}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+      token
+    ),
+
+  deleteComplianceRule: (token: string, ruleId: string) =>
+    request<void>(`/api/v1/compliance-rules/${ruleId}`, { method: "DELETE" }, token),
+
+  getPropertyCompliance: (token: string, propertyId: string) =>
+    request<PropertyCompliance>(`/api/v1/properties/${propertyId}/compliance`, {}, token),
 };

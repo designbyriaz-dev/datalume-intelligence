@@ -7,6 +7,7 @@ from app.api.v1.routers import (
     api_keys,
     auth,
     billing,
+    compliance,
     dashboards,
     datasets,
     documents,
@@ -48,3 +49,4 @@ api_router.include_router(properties.router)
 api_router.include_router(documents.router)
 api_router.include_router(inventories.router)
 api_router.include_router(maintenance.router)
+api_router.include_router(compliance.router)

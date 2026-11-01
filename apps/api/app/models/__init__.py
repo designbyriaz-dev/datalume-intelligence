@@ -3,6 +3,7 @@ from app.models.analysis import AnalysisRun
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.billing import BillingPeriod, Subscription, SubscriptionStatus, UsageCounter
+from app.models.compliance import ComplianceCheckType, ComplianceRule
 from app.models.dashboard import Dashboard, DashboardComment, DashboardWidget
 from app.models.dataset import (
     Dataset,
@@ -77,4 +78,6 @@ __all__ = [
     "MaintenanceRequest",
     "MaintenancePriority",
     "MaintenanceStatus",
+    "ComplianceRule",
+    "ComplianceCheckType",
 ]

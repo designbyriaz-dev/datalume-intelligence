@@ -4829,11 +4829,103 @@ as more than it is).
   (via a real round-trip, not assumed) that the resolved date was
   correctly set and persisted.
 
-**Explicitly not started**: the Compliance-rules engine — the last
-piece of Phase 2, and the one every other Phase 2 slice (Documents'
-`expiry_date`, Inventories' condition records, Maintenance's open/
-resolved status) was built specifically to give real data to check
-against.
+**Explicitly not started** (at the time this section was written): the
+Compliance-rules engine — the last piece of Phase 2, and the one every
+other Phase 2 slice (Documents' `expiry_date`, Inventories' condition
+records, Maintenance's open/resolved status) was built specifically to
+give real data to check against. **Addendum**: it's now also done — see
+the next section below. **Phase 2 is complete.**
+
+## Post-Phase-7: the compliance-rules engine (Phase 2, fifth and final slice, of the property-management brief)
+
+The fifth and final slice of Phase 2 — "a configurable `ComplianceRule`/
+`ComplianceCheck` engine with the exact status vocabulary the brief
+specifies." The single most important design decision here is a
+boundary, not a feature: this engine checks a property against rules the
+account holder *configures themselves* ("we require a valid gas safety
+certificate on file"); it never asserts that a property genuinely *is*
+legally compliant. The master brief is explicit about this — "do not
+invent certifications... or claim accreditation without verification"
+— so every rule is user-defined, every check result uses the brief's
+own careful, non-committal status vocabulary (Passes / Potential issue
+/ Missing information / Action may be overdue / Requires human review /
+Unable to determine) rather than a blunt pass/fail, and the frontend
+copy says outright that this "is not a legal determination."
+
+- ✅ **New model** (`app/models/compliance.py`): `ComplianceRule`,
+  workspace-scoped (reusable across every property in a portfolio, not
+  configured per-property). Only one `check_type` exists for v1 —
+  `DOCUMENT_REQUIRED`, evaluated against the `Document` rows Phase 2's
+  first slice already built (`document_type` + `expiry_date`) — chosen
+  because it's the dominant real concern in UK lettings (gas safety,
+  EICR, EPC, deposit protection, right-to-rent) and because it needed no
+  new data model, just a new way of reading data that already exists.
+- ✅ **No `ComplianceCheck` table**: results are computed fresh on every
+  request (`app/services/compliance.py`), never persisted — the same
+  "always reflects current state, never goes stale" choice already made
+  for rent-ledger balances (`property_kpis.py`) and the industry KPI
+  packs, not a new pattern invented for this round.
+- ✅ **Status mapping**, justified rather than arbitrary: a qualifying
+  document present and not expiring soon → Passes; present but expiring
+  within the rule's configurable warning window → Potential issue;
+  present but already expired → Action may be overdue; no qualifying
+  document on file at all → Missing information (the app doesn't know,
+  it isn't asserting the property lacks one in reality); present but the
+  rule needs expiry data the document doesn't have recorded → Requires
+  human review; a rule's `check_type` the engine doesn't recognise →
+  Unable to determine (a defensive fallback — a result an engine can't
+  evaluate is never silently reported as "passes").
+- ✅ **A real Python formatting bug found and fixed**: `DocumentType`
+  (like every other enum in this codebase) is a `(str, enum.Enum)`
+  mixin. On this Python version, an f-string interpolation of a mixin
+  enum member still calls Enum's own `__format__` rather than the
+  mixin's, rendering `"DocumentType.GAS_SAFETY_CERTIFICATE"` into
+  user-facing detail text instead of the plain value — confirmed
+  empirically (`f"{DocumentType.GAS_SAFETY_CERTIFICATE}"` really does
+  print the class-qualified form), not assumed. Every automated unit
+  test for this engine had passed `document_type=....value` explicitly
+  and never exercised the real path (the Pydantic schema validates an
+  incoming request into a genuine enum member before the model is
+  built) — **live verification in the browser is what caught this**,
+  seeing the literal broken string on a real property's Compliance
+  panel. Fixed with a small `_as_str()` helper in
+  `app/services/compliance.py`, and a new regression test
+  (`test_detail_message_is_plain_text_when_document_type_is_an_enum_member`)
+  constructs a rule with a real enum member specifically so this class
+  of bug can't silently return.
+- ✅ **API** (`app/api/v1/routers/compliance.py`): rule CRUD
+  (workspace-scoped create/list/update/delete) and
+  `GET /properties/{id}/compliance`, which evaluates every active rule
+  in the property's workspace against that property's real documents.
+- ✅ **Tests**: `tests/test_compliance.py` (all six statuses, the
+  "most relevant document is the one with the latest expiry" tie-break,
+  inactive rules being skipped, the unknown-check-type fallback, and the
+  enum-formatting regression test above) and `tests/test_compliance_api.py`
+  (rule CRUD, a real before/after compliance check across a document
+  upload, inactive-rule exclusion, tenant isolation, and workspace-delete
+  cascade). Full backend suite run clean against **both** SQLite and
+  real Postgres.
+- ✅ **Frontend**: a new `compliance-rules` workspace page (add/
+  activate/deactivate/delete a rule, with the "not a legal
+  determination" disclaimer stated up front) and a Compliance panel on
+  the property detail page showing each active rule's computed status
+  as a coloured badge plus its plain-English detail line.
+- ✅ **Verified live**: added a real "Gas Safety Certificate" rule and a
+  real "EPC" rule through the real running frontend against the real
+  running backend, and confirmed the property page correctly showed
+  "passes" for the gas safety certificate already on file (with the
+  correct expiry date in the detail text) and "missing information" for
+  the EPC (none uploaded) — including re-verifying after the enum-
+  formatting fix above to confirm the detail text reads correctly, not
+  just that the status badge was right.
+
+**This completes Phase 2** (Documents, Inventories, Maintenance
+requests, the Compliance-rules engine) of the property-management
+brief, on top of Phase 1 (Property Records & Rent Ledger). Still
+explicitly not started: Phase 3 (new public marketing pages), automated
+rent collection (blocked on a payment-provider decision), the tenant
+portal, and the pricing/tier restructure — all called out as deliberate,
+not oversights, in the Phase 1 section above.
 
 ## Known limitations in what's built
 
@@ -5029,3 +5121,10 @@ against.
     fourth slice, of the property-management brief)" above. Still
     open: the Compliance-rules engine — the last piece of Phase 2 —
     plus everything already listed as open in item 18 above.
+22. ~~**The compliance-rules engine**~~ — done (fifth and final slice
+    of Phase 2), see "Post-Phase-7: the compliance-rules engine (Phase
+    2, fifth and final slice, of the property-management brief)"
+    above. **Phase 2 is complete.** Still open: Phase 3 (new public
+    pages), automated rent collection (blocked on a payment-provider
+    decision), the tenant portal, and the pricing/tier restructure —
+    see that section and item 18 above.

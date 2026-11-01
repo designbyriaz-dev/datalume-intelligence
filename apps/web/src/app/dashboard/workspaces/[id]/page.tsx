@@ -2518,6 +2518,12 @@ export default function WorkspaceDetailPage() {
             >
               Properties & rent ledger →
             </Link>
+            <Link
+              href={`/dashboard/workspaces/${workspaceId}/compliance-rules`}
+              className="mt-1 block text-sm text-brand-500 hover:underline"
+            >
+              Compliance rules →
+            </Link>
           </>
         )}
 

@@ -966,6 +966,59 @@ function MaintenancePanel({ propertyId, tenancies, token }: { propertyId: string
   );
 }
 
+const COMPLIANCE_STATUS_STYLE: Record<string, string> = {
+  passes: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  potential_issue: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
+  missing_information: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  action_may_be_overdue: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+  requires_human_review: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  unable_to_determine: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+};
+
+function CompliancePanel({ propertyId, token }: { propertyId: string; token: string }) {
+  const [compliance, setCompliance] = useState<Awaited<ReturnType<typeof api.getPropertyCompliance>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .getPropertyCompliance(token, propertyId)
+      .then(setCompliance)
+      .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load compliance checks."));
+  }, [token, propertyId]);
+
+  return (
+    <div className="mt-10">
+      <h2 className="font-medium">Compliance</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Checked against the workspace&rsquo;s compliance rules and the documents on file for this property —
+        not a legal determination.
+      </p>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {!compliance ? (
+        <p className="mt-2 text-sm text-slate-500">Loading…</p>
+      ) : compliance.checks.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-500">
+          No active compliance rules for this workspace yet — add some from the workspace page.
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {compliance.checks.map((c) => (
+            <li key={c.rule_id} className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">{c.rule_name}</span>
+                <span className={`rounded px-2 py-0.5 text-xs font-medium ${COMPLIANCE_STATUS_STYLE[c.status]}`}>
+                  {formatLabel(c.status)}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{c.detail}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function PropertyDetailPage() {
   const { token, user, loading } = useAuth();
   const router = useRouter();
@@ -1130,6 +1183,8 @@ export default function PropertyDetailPage() {
         <DocumentsPanel propertyId={propertyId} tenancies={tenancies ?? []} token={token!} />
 
         <MaintenancePanel propertyId={propertyId} tenancies={tenancies ?? []} token={token!} />
+
+        <CompliancePanel propertyId={propertyId} token={token!} />
       </div>
     </main>
   );
