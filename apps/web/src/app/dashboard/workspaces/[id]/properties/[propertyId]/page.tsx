@@ -12,6 +12,9 @@ import {
   type Inventory,
   type InventoryType,
   type ItemCondition,
+  type MaintenancePriority,
+  type MaintenanceRequest,
+  type MaintenanceStatus,
   type Property,
   type PropertyDocument,
   type RentLedgerEntry,
@@ -735,6 +738,234 @@ function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
   );
 }
 
+const MAINTENANCE_PRIORITIES: MaintenancePriority[] = ["low", "medium", "high", "emergency"];
+const MAINTENANCE_STATUSES: MaintenanceStatus[] = [
+  "reported",
+  "acknowledged",
+  "in_progress",
+  "completed",
+  "cancelled",
+];
+
+function priorityColor(priority: MaintenancePriority): string {
+  switch (priority) {
+    case "emergency":
+      return "text-red-600";
+    case "high":
+      return "text-amber-600";
+    case "low":
+      return "text-slate-400";
+    default:
+      return "text-slate-500";
+  }
+}
+
+function MaintenancePanel({ propertyId, tenancies, token }: { propertyId: string; tenancies: Tenancy[]; token: string }) {
+  const [requests, setRequests] = useState<MaintenanceRequest[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<MaintenancePriority>("medium");
+  const [reportedDate, setReportedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [tenancyId, setTenancyId] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRequests(await api.listMaintenanceRequests(token, propertyId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load maintenance requests.");
+      setRequests([]);
+    }
+  }, [token, propertyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const onCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await api.createMaintenanceRequest(token, propertyId, {
+        title,
+        description: description || undefined,
+        priority,
+        reported_date: reportedDate,
+        tenancy_id: tenancyId || undefined,
+      });
+      setTitle("");
+      setDescription("");
+      setPriority("medium");
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create maintenance request.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onUpdateStatus = async (request: MaintenanceRequest, status: MaintenanceStatus) => {
+    setUpdatingId(request.id);
+    setError(null);
+    try {
+      await api.updateMaintenanceRequest(token, request.id, {
+        status,
+        priority: request.priority,
+        resolved_date:
+          status === "completed" || status === "cancelled"
+            ? request.resolved_date ?? new Date().toISOString().slice(0, 10)
+            : null,
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update maintenance request.");
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const onDelete = async (requestId: string) => {
+    setError(null);
+    try {
+      await api.deleteMaintenanceRequest(token, requestId);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete maintenance request.");
+    }
+  };
+
+  return (
+    <div className="mt-10">
+      <h2 className="font-medium">Maintenance requests</h2>
+      <p className="mt-1 text-xs text-slate-500">
+        A register of reported issues for this property — no contractor dispatch or scheduling happens here
+        yet, just tracking.
+      </p>
+
+      <form onSubmit={onCreate} className="mt-3 space-y-2 rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="flex-1">
+            <label className="block text-xs font-medium">Title</label>
+            <input
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Boiler not working"
+              className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium">Priority</label>
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value as MaintenancePriority)}
+              className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              {MAINTENANCE_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium">Reported</label>
+            <input
+              type="date"
+              required
+              value={reportedDate}
+              onChange={(e) => setReportedDate(e.target.value)}
+              className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+          {tenancies.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium">Reported by</label>
+              <select
+                value={tenancyId}
+                onChange={(e) => setTenancyId(e.target.value)}
+                className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+              >
+                <option value="">Landlord/agent</option>
+                {tenancies.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.tenant_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Description (optional)"
+          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+        />
+        <button
+          type="submit"
+          disabled={creating}
+          className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+        >
+          {creating ? "Reporting…" : "Report issue"}
+        </button>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </form>
+
+      <div className="mt-3">
+        {requests === null ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : requests.length === 0 ? (
+          <p className="text-sm text-slate-500">No maintenance requests yet.</p>
+        ) : (
+          <ul className="space-y-1">
+            {requests.map((r) => (
+              <li
+                key={r.id}
+                className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2 text-sm dark:bg-slate-900"
+              >
+                <div>
+                  <div className="font-medium">
+                    {r.title} <span className={`text-xs ${priorityColor(r.priority)}`}>({r.priority})</span>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Reported {new Date(r.reported_date).toLocaleDateString()}
+                    {r.resolved_date && ` · resolved ${new Date(r.resolved_date).toLocaleDateString()}`}
+                    {r.description && ` · ${r.description}`}
+                  </div>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-2">
+                  <select
+                    value={r.status}
+                    onChange={(e) => onUpdateStatus(r, e.target.value as MaintenanceStatus)}
+                    disabled={updatingId === r.id}
+                    className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    {MAINTENANCE_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {formatLabel(s)}
+                      </option>
+                    ))}
+                  </select>
+                  <button onClick={() => onDelete(r.id)} className="text-xs text-slate-400 hover:text-red-500">
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PropertyDetailPage() {
   const { token, user, loading } = useAuth();
   const router = useRouter();
@@ -897,6 +1128,8 @@ export default function PropertyDetailPage() {
         </div>
 
         <DocumentsPanel propertyId={propertyId} tenancies={tenancies ?? []} token={token!} />
+
+        <MaintenancePanel propertyId={propertyId} tenancies={tenancies ?? []} token={token!} />
       </div>
     </main>
   );

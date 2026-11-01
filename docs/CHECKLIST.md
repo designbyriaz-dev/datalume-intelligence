@@ -4783,8 +4783,57 @@ new damage.
   correctly reported exactly one changed item with the right before/after
   values — not a fabricated or assumed result.
 
-**Explicitly not started**: Maintenance requests and the
-Compliance-rules engine — the last two pieces of Phase 2.
+**Explicitly not started** (at the time this section was written):
+Maintenance requests and the Compliance-rules engine — the last two
+pieces of Phase 2. **Addendum**: Maintenance requests is now also
+done — see the next section below.
+
+## Post-Phase-7: maintenance request register (Phase 2, fourth slice, of the property-management brief)
+
+The fourth slice of Phase 2, after Property Records (Phase 1), Documents,
+and Inventories. The brief's own phrase for this is "a MaintenanceRequest
+register" — a simple issue-tracking log for reported property problems,
+not a contractor-dispatch or job-scheduling system (that distinction is
+stated explicitly in the frontend copy too, so nothing here is overstated
+as more than it is).
+
+- ✅ **New model** (`app/models/maintenance.py`): `MaintenanceRequest`,
+  scoped to `Property`, not `Tenancy` — deliberately different from
+  `RentLedgerEntry`/`Inventory`. A maintenance issue ("boiler broken",
+  "leaking roof") is fundamentally about the property and can exist
+  with no tenant involved at all (a landlord's own routine
+  maintenance); `tenancy_id` is an optional pointer to which tenancy
+  *reported* it, not the scoping key, and uses `ondelete="SET NULL"`
+  rather than `CASCADE` for exactly that reason.
+- ✅ **API** (`app/api/v1/routers/maintenance.py`): create, list (with
+  an optional `?status=` filter), get, a restricted-field update
+  (status/priority/resolved_date — mirrors `TenancyUpdate`'s pattern of
+  only exposing the fields that actually change over the record's
+  life), and delete. Reuses the `get_property_chain_or_404`/
+  `get_tenancy_chain_or_404` resolvers added during the Documents
+  round, including the same "tenancy_id must belong to this property"
+  400 check Documents already established.
+- ✅ **Tests**: `tests/test_maintenance.py` — create, status/priority/
+  resolved_date update, status filtering, cross-property tenancy_id
+  rejection, tenant isolation, delete, and property-delete cascade.
+  Full backend suite run clean against **both** SQLite and real
+  Postgres.
+- ✅ **Frontend**: a Maintenance panel on the property detail page (a
+  register, not nested per-tenancy like Inventories — matching the
+  model's own Property scoping) — a report-issue form (title, priority,
+  reported date, optional "reported by" tenancy) and a list with an
+  inline status dropdown per request.
+- ✅ **Verified live**: reported a real issue ("Boiler not working")
+  through the real running frontend against the real running backend,
+  then changed its status to "completed" through the UI and confirmed
+  (via a real round-trip, not assumed) that the resolved date was
+  correctly set and persisted.
+
+**Explicitly not started**: the Compliance-rules engine — the last
+piece of Phase 2, and the one every other Phase 2 slice (Documents'
+`expiry_date`, Inventories' condition records, Maintenance's open/
+resolved status) was built specifically to give real data to check
+against.
 
 ## Known limitations in what's built
 
@@ -4975,3 +5024,8 @@ Compliance-rules engine — the last two pieces of Phase 2.
     brief)" above. Still open: Maintenance requests and the
     Compliance-rules engine (the last two pieces of Phase 2), plus
     everything already listed as open in item 18 above.
+21. ~~**Maintenance request register**~~ — done (fourth slice of Phase
+    2), see "Post-Phase-7: maintenance request register (Phase 2,
+    fourth slice, of the property-management brief)" above. Still
+    open: the Compliance-rules engine — the last piece of Phase 2 —
+    plus everything already listed as open in item 18 above.

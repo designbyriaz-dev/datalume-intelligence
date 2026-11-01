@@ -14,6 +14,7 @@ from app.models.dataset import (
 from app.models.document import Document, DocumentType
 from app.models.email_token import EmailToken, EmailTokenPurpose
 from app.models.inventory import Inventory, InventoryItem, InventoryType, ItemCondition
+from app.models.maintenance import MaintenancePriority, MaintenanceRequest, MaintenanceStatus
 from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
 from app.models.property import LedgerEntryType, Property, RentFrequency, RentLedgerEntry, Tenancy, TenancyStatus
@@ -73,4 +74,7 @@ __all__ = [
     "InventoryItem",
     "InventoryType",
     "ItemCondition",
+    "MaintenanceRequest",
+    "MaintenancePriority",
+    "MaintenanceStatus",
 ]

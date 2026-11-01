@@ -249,6 +249,22 @@ export interface InventoryComparison {
   unchanged_count: number;
 }
 
+export type MaintenancePriority = "low" | "medium" | "high" | "emergency";
+export type MaintenanceStatus = "reported" | "acknowledged" | "in_progress" | "completed" | "cancelled";
+
+export interface MaintenanceRequest {
+  id: string;
+  property_id: string;
+  tenancy_id: string | null;
+  title: string;
+  description: string | null;
+  priority: MaintenancePriority;
+  status: MaintenanceStatus;
+  reported_date: string;
+  resolved_date: string | null;
+  created_by_user_id: string | null;
+}
+
 export interface ColumnProfile {
   name: string;
   inferred_type: string;
@@ -1337,4 +1353,42 @@ export const api = {
 
   compareInventories: (token: string, beforeId: string, afterId: string) =>
     request<InventoryComparison>(`/api/v1/inventories/${beforeId}/compare/${afterId}`, {}, token),
+
+  listMaintenanceRequests: (token: string, propertyId: string, status?: MaintenanceStatus) =>
+    request<MaintenanceRequest[]>(
+      `/api/v1/properties/${propertyId}/maintenance-requests${status ? `?status=${status}` : ""}`,
+      {},
+      token
+    ),
+
+  createMaintenanceRequest: (
+    token: string,
+    propertyId: string,
+    payload: {
+      title: string;
+      description?: string;
+      priority?: MaintenancePriority;
+      reported_date: string;
+      tenancy_id?: string;
+    }
+  ) =>
+    request<MaintenanceRequest>(
+      `/api/v1/properties/${propertyId}/maintenance-requests`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  updateMaintenanceRequest: (
+    token: string,
+    requestId: string,
+    payload: { status: MaintenanceStatus; priority: MaintenancePriority; resolved_date?: string | null }
+  ) =>
+    request<MaintenanceRequest>(
+      `/api/v1/maintenance-requests/${requestId}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+      token
+    ),
+
+  deleteMaintenanceRequest: (token: string, requestId: string) =>
+    request<void>(`/api/v1/maintenance-requests/${requestId}`, { method: "DELETE" }, token),
 };

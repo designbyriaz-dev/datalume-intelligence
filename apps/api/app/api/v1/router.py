@@ -13,6 +13,7 @@ from app.api.v1.routers import (
     health,
     industry,
     inventories,
+    maintenance,
     organizations,
     properties,
     reports,
@@ -46,3 +47,4 @@ api_router.include_router(saved_scenarios.router)
 api_router.include_router(properties.router)
 api_router.include_router(documents.router)
 api_router.include_router(inventories.router)
+api_router.include_router(maintenance.router)
