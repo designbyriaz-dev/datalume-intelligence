@@ -9,6 +9,9 @@ import {
   api,
   ApiError,
   type DocumentType,
+  type Inventory,
+  type InventoryType,
+  type ItemCondition,
   type Property,
   type PropertyDocument,
   type RentLedgerEntry,
@@ -17,6 +20,319 @@ import {
 } from "@/lib/api";
 
 const LEDGER_ENTRY_TYPES: RentLedgerEntry["entry_type"][] = ["charge", "payment", "adjustment", "refund"];
+
+const INVENTORY_TYPES: InventoryType[] = ["check_in", "check_out", "mid_term"];
+const ITEM_CONDITIONS: ItemCondition[] = ["excellent", "good", "fair", "poor", "damaged", "missing"];
+
+function formatLabel(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+interface InventoryItemRow {
+  room: string;
+  item_name: string;
+  condition: ItemCondition;
+  notes: string;
+}
+
+function InventoriesPanel({ tenancyId, token }: { tenancyId: string; token: string }) {
+  const [inventories, setInventories] = useState<Inventory[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const [open, setOpen] = useState(false);
+  const [inventoryType, setInventoryType] = useState<InventoryType>("check_in");
+  const [inspectionDate, setInspectionDate] = useState(new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const [rows, setRows] = useState<InventoryItemRow[]>([
+    { room: "", item_name: "", condition: "good", notes: "" },
+  ]);
+  const [creating, setCreating] = useState(false);
+
+  const [beforeId, setBeforeId] = useState("");
+  const [afterId, setAfterId] = useState("");
+  const [comparing, setComparing] = useState(false);
+  const [comparison, setComparison] = useState<Awaited<ReturnType<typeof api.compareInventories>> | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setInventories(await api.listInventories(token, tenancyId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load inventories.");
+      setInventories([]);
+    }
+  }, [token, tenancyId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const updateRow = (index: number, patch: Partial<InventoryItemRow>) => {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  };
+
+  const addRow = () => setRows((prev) => [...prev, { room: "", item_name: "", condition: "good", notes: "" }]);
+  const removeRow = (index: number) => setRows((prev) => prev.filter((_, i) => i !== index));
+
+  const onCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const items = rows
+      .filter((r) => r.room.trim() && r.item_name.trim())
+      .map((r) => ({ room: r.room, item_name: r.item_name, condition: r.condition, notes: r.notes || undefined }));
+    setCreating(true);
+    setError(null);
+    try {
+      await api.createInventory(token, tenancyId, {
+        inventory_type: inventoryType,
+        inspection_date: inspectionDate,
+        notes: notes || undefined,
+        items,
+      });
+      setNotes("");
+      setRows([{ room: "", item_name: "", condition: "good", notes: "" }]);
+      setOpen(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create inventory.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onDelete = async (inventoryId: string) => {
+    setError(null);
+    try {
+      await api.deleteInventory(token, inventoryId);
+      setComparison(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete inventory.");
+    }
+  };
+
+  const onCompare = async () => {
+    if (!beforeId || !afterId) return;
+    setComparing(true);
+    setError(null);
+    try {
+      setComparison(await api.compareInventories(token, beforeId, afterId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not compare inventories.");
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 p-3 dark:border-slate-800">
+      <div className="flex items-center justify-between">
+        <h4 className="text-xs font-medium uppercase text-slate-500">Inventories</h4>
+        <button onClick={() => setOpen((v) => !v)} className="text-xs text-brand-500 hover:underline">
+          {open ? "Close" : "+ Add inventory"}
+        </button>
+      </div>
+
+      {open && (
+        <form onSubmit={onCreate} className="mt-2 space-y-2 rounded-md border border-dashed border-slate-300 p-3 dark:border-slate-700">
+          <div className="flex flex-wrap items-end gap-2">
+            <select
+              value={inventoryType}
+              onChange={(e) => setInventoryType(e.target.value as InventoryType)}
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            >
+              {INVENTORY_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {formatLabel(t)}
+                </option>
+              ))}
+            </select>
+            <input
+              type="date"
+              required
+              value={inspectionDate}
+              onChange={(e) => setInspectionDate(e.target.value)}
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            />
+            <input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Overall notes (optional)"
+              className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+
+          <div className="space-y-1">
+            {rows.map((row, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-1">
+                <input
+                  value={row.room}
+                  onChange={(e) => updateRow(i, { room: e.target.value })}
+                  placeholder="Room"
+                  className="w-28 rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                />
+                <input
+                  value={row.item_name}
+                  onChange={(e) => updateRow(i, { item_name: e.target.value })}
+                  placeholder="Item"
+                  className="w-28 rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                />
+                <select
+                  value={row.condition}
+                  onChange={(e) => updateRow(i, { condition: e.target.value as ItemCondition })}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                >
+                  {ITEM_CONDITIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={row.notes}
+                  onChange={(e) => updateRow(i, { notes: e.target.value })}
+                  placeholder="Notes (optional)"
+                  className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                />
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(i)}
+                    aria-label="Remove item"
+                    className="text-xs text-slate-400 hover:text-red-500"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={addRow} className="text-xs text-brand-500 hover:underline">
+              + Add item
+            </button>
+            <button
+              type="submit"
+              disabled={creating}
+              className="rounded-md bg-brand-500 px-3 py-1 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {creating ? "Saving…" : "Save inventory"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+
+      <div className="mt-2">
+        {inventories === null ? (
+          <p className="text-xs text-slate-500">Loading…</p>
+        ) : inventories.length === 0 ? (
+          <p className="text-xs text-slate-500">No inventories yet.</p>
+        ) : (
+          <ul className="space-y-1">
+            {inventories.map((inv) => (
+              <li key={inv.id} className="rounded-md bg-slate-50 px-2 py-1 text-xs dark:bg-slate-900">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">
+                    {formatLabel(inv.inventory_type)} · {new Date(inv.inspection_date).toLocaleDateString()} ·{" "}
+                    {inv.items.length} item{inv.items.length === 1 ? "" : "s"}
+                  </span>
+                  <button onClick={() => onDelete(inv.id)} className="text-slate-400 hover:text-red-500">
+                    Delete
+                  </button>
+                </div>
+                {inv.notes && <div className="text-slate-500">{inv.notes}</div>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {inventories && inventories.length >= 2 && (
+        <div className="mt-3 border-t border-slate-200 pt-2 dark:border-slate-800">
+          <div className="text-xs font-medium text-slate-500">Compare two inventories</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <select
+              value={beforeId}
+              onChange={(e) => setBeforeId(e.target.value)}
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">Before…</option>
+              {inventories.map((inv) => (
+                <option key={inv.id} value={inv.id}>
+                  {formatLabel(inv.inventory_type)} · {new Date(inv.inspection_date).toLocaleDateString()}
+                </option>
+              ))}
+            </select>
+            <select
+              value={afterId}
+              onChange={(e) => setAfterId(e.target.value)}
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">After…</option>
+              {inventories.map((inv) => (
+                <option key={inv.id} value={inv.id}>
+                  {formatLabel(inv.inventory_type)} · {new Date(inv.inspection_date).toLocaleDateString()}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={onCompare}
+              disabled={!beforeId || !afterId || comparing}
+              className="rounded-md border border-slate-300 px-3 py-1 text-xs font-medium hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+            >
+              {comparing ? "Comparing…" : "Compare"}
+            </button>
+          </div>
+
+          {comparison && (
+            <div className="mt-2 overflow-x-auto">
+              <div className="text-xs text-slate-500">
+                {comparison.added_count} added · {comparison.removed_count} removed ·{" "}
+                {comparison.changed_count} changed · {comparison.unchanged_count} unchanged
+              </div>
+              <table className="mt-1 w-full text-left text-xs">
+                <thead>
+                  <tr className="text-slate-500">
+                    <th className="pr-3 py-1">Room</th>
+                    <th className="pr-3 py-1">Item</th>
+                    <th className="pr-3 py-1">Status</th>
+                    <th className="pr-3 py-1">Before</th>
+                    <th className="pr-3 py-1">After</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.items.map((d, i) => (
+                    <tr key={i} className="border-t border-slate-200 dark:border-slate-800">
+                      <td className="pr-3 py-1">{d.room}</td>
+                      <td className="pr-3 py-1">{d.item_name}</td>
+                      <td
+                        className={
+                          "pr-3 py-1 " +
+                          (d.status === "changed"
+                            ? "text-amber-600"
+                            : d.status === "removed"
+                              ? "text-red-600"
+                              : d.status === "added"
+                                ? "text-green-600"
+                                : "text-slate-500")
+                        }
+                      >
+                        {d.status}
+                      </td>
+                      <td className="pr-3 py-1">{d.condition_before ?? "—"}</td>
+                      <td className="pr-3 py-1">{d.condition_after ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const DOCUMENT_TYPES: DocumentType[] = [
   "tenancy_agreement",
@@ -413,6 +729,8 @@ function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
           </table>
         )}
       </div>
+
+      <InventoriesPanel tenancyId={tenancy.id} token={token} />
     </div>
   );
 }

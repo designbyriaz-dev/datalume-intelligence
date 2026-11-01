@@ -4704,11 +4704,87 @@ Phase 2.
   its type and expiry date, and confirmed Download actually returns the
   file (a real `200 OK` network request, not just a UI appearance).
 
-**Explicitly not started**: Inventories, Maintenance requests, and the
-Compliance-rules engine (the rest of Phase 2 — Documents was taken first
-specifically so these have real document rows with real types/expiry
-dates to build against) — same honest "not an oversight" flag the Phase
-1 section above uses for what it deferred.
+**Explicitly not started** (at the time this section was written):
+Inventories, Maintenance requests, and the Compliance-rules engine (the
+rest of Phase 2 — Documents was taken first specifically so these have
+real document rows with real types/expiry dates to build against) — same
+honest "not an oversight" flag the Phase 1 section above uses for what
+it deferred. **Addendum**: Inventories is now also done — see the next
+section below.
+
+## Post-Phase-7: check-in/check-out inventories (Phase 2, third slice, of the property-management brief)
+
+The third slice of Phase 2, after Property Records (Phase 1) and
+Documents. An `Inventory` is a point-in-time condition record for a
+`Tenancy` (check-in, check-out, or a mid-term inspection), made up of
+per-room/item rows — the brief's own phrase for this is "check-in/
+check-out inventory records with a diff view," and the diff view is the
+central real use case: comparing a tenancy's check-in inventory against
+its check-out inventory to surface condition changes, missing items, and
+new damage.
+
+- ✅ **New models** (`app/models/inventory.py`): `Inventory` and
+  `InventoryItem`. `Inventory` is scoped to `Tenancy`, not `Property`
+  directly — the same reasoning `RentLedgerEntry` already follows (an
+  inventory only makes sense against a specific tenant's occupancy
+  period; the property is always reachable via `tenancy.property_id`
+  rather than duplicated). `InventoryItem` rows are matched by
+  `(room, item_name)`, not by a stable id, across different inventories
+  of the same tenancy — a check-in and a check-out inventory are two
+  independent sets of rows describing the same physical items, not two
+  versions of the same rows.
+- ✅ **The diff view** (`app/services/inventory_compare.py`): a
+  deterministic, pure function over two already-loaded `Inventory`
+  objects — mirrors `app/services/version_compare.py`'s "pure function,
+  dict/dataclass-shaped output" approach for the same testability
+  reason that module's own docstring gives, though the matching
+  strategy itself is different (key-matched rows here, column-aggregate
+  statistics there — a dataset version comparison and an inventory
+  comparison are genuinely different shapes of problem). Reports four
+  categories per item: unchanged, changed (condition and/or notes),
+  added, removed.
+- ✅ **API** (`app/api/v1/routers/inventories.py`): create (with a full
+  nested item list in one call — matching how a real inspection is
+  actually done, walk the property once and record everything), list,
+  get, delete, and `GET /inventories/{before_id}/compare/{after_id}`
+  (rejects comparing inventories from two different tenancies with a
+  400, not a confusing diff).
+- ✅ **A real async-ORM bug found and fixed**: the create endpoint
+  originally called `db.refresh(inventory)` after `commit()` before
+  returning it. Since this session's `expire_on_commit=False`
+  (`app/db/session.py`) already keeps the in-memory `items` list
+  populated (ids and server-generated timestamps included, via
+  `RETURNING`), that `refresh()` call was not only unnecessary but
+  actively harmful — `Session.refresh()` re-expires relationship
+  attributes it isn't explicitly told to include, so the very next
+  access to `.items` during response serialization tried to lazy-load
+  outside an awaited context and raised a real `MissingGreenlet` error.
+  Caught by the endpoint's own test, not inferred — fixed by removing
+  the unnecessary refresh, with the reasoning left as a comment so it
+  doesn't get re-added by habit later.
+- ✅ **Tests**: `tests/test_inventory_compare.py` (identical inventories,
+  a condition change, a notes-only change, an item missing at check-out,
+  a new item at check-out, and a mixed multi-item comparison exercising
+  all four categories at once) and `tests/test_inventories.py` (create
+  with nested items, the real check-in/check-out compare scenario,
+  rejecting a cross-tenancy comparison, tenant isolation, and a full
+  cascade-delete chain test: property → tenancy → inventory →
+  inventory_item). Full backend suite run clean against **both** SQLite
+  and real Postgres.
+- ✅ **Frontend**: an Inventories panel nested inside each tenancy's card
+  on the property detail page — an "Add inventory" form with a dynamic
+  room/item/condition/notes row editor, a list of existing inventories,
+  and (once two or more exist) a before/after selector that renders the
+  diff as a table, colour-coded by status.
+- ✅ **Verified live**: created a real check-in inventory (Kitchen/Oven,
+  condition "good") and a real check-out inventory (same item, condition
+  "damaged", with a note) through the real running frontend against the
+  real running backend, then ran the real comparison and confirmed it
+  correctly reported exactly one changed item with the right before/after
+  values — not a fabricated or assumed result.
+
+**Explicitly not started**: Maintenance requests and the
+Compliance-rules engine — the last two pieces of Phase 2.
 
 ## Known limitations in what's built
 
@@ -4893,3 +4969,9 @@ dates to build against) — same honest "not an oversight" flag the Phase
     property-management brief)" above. Still open: Inventories,
     Maintenance requests, and the Compliance-rules engine (the rest of
     Phase 2), plus everything already listed as open in item 18 above.
+20. ~~**Check-in/check-out inventories with a diff view**~~ — done
+    (third slice of Phase 2), see "Post-Phase-7: check-in/check-out
+    inventories (Phase 2, third slice, of the property-management
+    brief)" above. Still open: Maintenance requests and the
+    Compliance-rules engine (the last two pieces of Phase 2), plus
+    everything already listed as open in item 18 above.

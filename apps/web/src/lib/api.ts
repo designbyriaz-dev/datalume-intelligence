@@ -207,6 +207,48 @@ export interface PropertyDocument {
   uploaded_by_user_id: string | null;
 }
 
+export type InventoryType = "check_in" | "check_out" | "mid_term";
+export type ItemCondition = "excellent" | "good" | "fair" | "poor" | "damaged" | "missing";
+
+export interface InventoryItem {
+  id: string;
+  inventory_id: string;
+  room: string;
+  item_name: string;
+  condition: ItemCondition;
+  notes: string | null;
+}
+
+export interface Inventory {
+  id: string;
+  tenancy_id: string;
+  inventory_type: InventoryType;
+  inspection_date: string;
+  notes: string | null;
+  created_by_user_id: string | null;
+  items: InventoryItem[];
+}
+
+export interface InventoryItemDiff {
+  room: string;
+  item_name: string;
+  status: "unchanged" | "changed" | "added" | "removed";
+  condition_before: ItemCondition | null;
+  condition_after: ItemCondition | null;
+  notes_before: string | null;
+  notes_after: string | null;
+}
+
+export interface InventoryComparison {
+  before_inventory_id: string;
+  after_inventory_id: string;
+  items: InventoryItemDiff[];
+  added_count: number;
+  removed_count: number;
+  changed_count: number;
+  unchanged_count: number;
+}
+
 export interface ColumnProfile {
   name: string;
   inferred_type: string;
@@ -1270,4 +1312,29 @@ export const api = {
     }
     return res.blob();
   },
+
+  listInventories: (token: string, tenancyId: string) =>
+    request<Inventory[]>(`/api/v1/tenancies/${tenancyId}/inventories`, {}, token),
+
+  createInventory: (
+    token: string,
+    tenancyId: string,
+    payload: {
+      inventory_type: InventoryType;
+      inspection_date: string;
+      notes?: string;
+      items: { room: string; item_name: string; condition: ItemCondition; notes?: string }[];
+    }
+  ) =>
+    request<Inventory>(
+      `/api/v1/tenancies/${tenancyId}/inventories`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token
+    ),
+
+  deleteInventory: (token: string, inventoryId: string) =>
+    request<void>(`/api/v1/inventories/${inventoryId}`, { method: "DELETE" }, token),
+
+  compareInventories: (token: string, beforeId: string, afterId: string) =>
+    request<InventoryComparison>(`/api/v1/inventories/${beforeId}/compare/${afterId}`, {}, token),
 };
