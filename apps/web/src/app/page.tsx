@@ -61,6 +61,20 @@ export default function HomePage() {
         </p>
       </section>
 
+      <section className="mx-auto max-w-4xl px-6 py-16 text-center">
+        <h2 className="text-2xl font-semibold">Managing property, not just analysing it</h2>
+        <p className="mt-3 text-slate-600 dark:text-slate-400">
+          Structured property and tenancy records, a rent ledger, documents, check-in/check-out
+          inventories, a maintenance register, and configurable compliance checks.
+        </p>
+        <Link
+          href="/property-intelligence"
+          className="mt-6 inline-block text-brand-500 hover:underline"
+        >
+          See Property Intelligence →
+        </Link>
+      </section>
+
       <MarketingFooter />
     </main>
   );

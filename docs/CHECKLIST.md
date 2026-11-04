@@ -4922,10 +4922,72 @@ copy says outright that this "is not a legal determination."
 **This completes Phase 2** (Documents, Inventories, Maintenance
 requests, the Compliance-rules engine) of the property-management
 brief, on top of Phase 1 (Property Records & Rent Ledger). Still
-explicitly not started: Phase 3 (new public marketing pages), automated
-rent collection (blocked on a payment-provider decision), the tenant
-portal, and the pricing/tier restructure — all called out as deliberate,
-not oversights, in the Phase 1 section above.
+explicitly not started (at the time this section was written): Phase 3
+(new public marketing pages), automated rent collection (blocked on a
+payment-provider decision), the tenant portal, and the pricing/tier
+restructure. **Addendum**: Phase 3 is now also done — see the next
+section below.
+
+## Post-Phase-7: Phase 3 public pages (property-management brief)
+
+Eight new public pages, per the brief's own Phase 3 list — Property
+Intelligence, Housing Intelligence, Compliance Intelligence, Rent
+Collection, Inventory & Documents, About, Contact, and an Acceptable Use
+Policy. Zero backend risk (pure frontend/content), but the one real
+discipline this round required was the brief's own explicit instruction:
+"do not build a frontend-only simulation and describe it as a complete
+product" and "clearly distinguish live features, beta features and
+planned features."
+
+- ✅ **Property Intelligence, Housing Intelligence, Compliance
+  Intelligence, Inventory & Documents** (`apps/web/src/app/{property-
+  intelligence,housing-intelligence,compliance-intelligence,inventory-
+  documents}/page.tsx`) — describe real, live Phase 1/2 functionality
+  only (property/tenancy records, the rent ledger, documents,
+  inventories with their diff view, maintenance requests, the
+  compliance-rules engine). The Compliance Intelligence page repeats the
+  same "this is a configurable checklist, not legal advice" boundary the
+  engine itself states in-app — not a separate, looser marketing claim.
+- ✅ **Rent Collection** (`apps/web/src/app/rent-collection/page.tsx`) —
+  the one page where the live/planned split actually mattered. Clearly
+  separates what's real today (the manual, append-only rent ledger —
+  labelled "Live today") from automated collection (labelled "Planned —
+  not yet built", with the real reason: it's a regulated activity,
+  blocked on choosing a payment provider and confirming the commercial/
+  regulatory arrangements that implies, per Phase 1's own deferred
+  decision point above). Does not imply automated collection exists.
+- ✅ **About** (`apps/web/src/app/about/page.tsx`) — deliberately
+  conservative: describes what the product does and how the project
+  works (real, tested, verified before being called done), names the
+  real registered company (DataLume Intelligence Ltd, England and
+  Wales), and invents no founding story, team bios, funding, or
+  customer testimonials — none of that is known/verified, so none of it
+  is claimed.
+- ✅ **Contact** (`apps/web/src/app/contact/page.tsx`) — a direct email
+  contact (`support@datalume.co.uk`, a real address the user asked to be
+  used here specifically), cross-linked to the Security page for
+  vulnerability reports and the Privacy Policy for GDPR requests rather
+  than duplicating that content.
+- ✅ **Acceptable Use Policy** (`apps/web/src/app/acceptable-use/page.tsx`)
+  — same "Draft — pending legal review" banner and structure as the
+  existing Terms/Privacy/Cookies/DPA pages, substantive (real
+  misuse categories: authentication/tenant-isolation probing, data
+  scraping, AI-analyst prompt injection, and a section stating plainly
+  that a compliance check must not be represented to a third party as an
+  independent legal determination) rather than placeholder text.
+- ✅ **Navigation**: `MarketingFooter` gained a new property-management
+  link row (the five Intelligence/Collection/Documents pages) and About/
+  Contact in the main row and Acceptable Use in the legal row; the
+  homepage got a short new section linking to Property Intelligence.
+- ✅ Frontend typecheck clean (`tsc --noEmit`), automated tests
+  73/73 passing (no regressions — these are static content pages,
+  nothing new to unit-test beyond what existing suites already cover).
+- ✅ **Verified live**: started the real Next.js dev server and read
+  every new page's actual rendered text (not just the source) for all
+  eight pages, confirming the Rent Collection page's live/planned
+  distinction renders correctly, the Compliance Intelligence page's six
+  statuses and legal-boundary disclaimer render correctly, and the
+  Contact page shows the correct email address.
 
 ## Known limitations in what's built
 
@@ -5128,3 +5190,11 @@ not oversights, in the Phase 1 section above.
     pages), automated rent collection (blocked on a payment-provider
     decision), the tenant portal, and the pricing/tier restructure —
     see that section and item 18 above.
+23. ~~**Phase 3 public pages**~~ — done, see "Post-Phase-7: Phase 3
+    public pages (property-management brief)" above. **Phases 1-3 of
+    the property-management brief are now all complete.** Still open:
+    automated rent collection (blocked on a payment-provider decision —
+    this is now the main remaining item), the tenant portal, the
+    pricing/tier restructure, and the six further industry packs listed
+    in the plan's "Later" phase — each needs real domain input from the
+    user first, same as every pack built so far.
