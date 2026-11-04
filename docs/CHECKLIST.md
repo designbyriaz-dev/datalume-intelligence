@@ -4989,6 +4989,58 @@ planned features."
   statuses and legal-boundary disclaimer render correctly, and the
   Contact page shows the correct email address.
 
+## Post-Phase-7: first real deployment runbook (Railway)
+
+The account holder asked to deploy to production. No deployment has ever
+existed anywhere before this — see docs/DEPLOYMENT.md's original "not a
+claim that any particular cloud setup has been tried" framing. Chose
+Railway and a **private-first** launch (a real URL to test and share, not
+a public launch) given Stripe live mode, legal review, and Google OAuth
+verification are all still open — see item 22 above.
+
+An AI agent cannot create the hosting account, enter billing details, or
+type real secret values into a dashboard — those are explicitly the
+account holder's own steps, laid out precisely in docs/DEPLOYMENT.md's
+new "Railway deployment" section rather than left vague. What *was* done:
+
+- ✅ **A real deployability bug found and fixed**: `apps/web/Dockerfile`'s
+  build didn't accept `NEXT_PUBLIC_API_URL` as a build argument. Next.js
+  inlines `NEXT_PUBLIC_*` variables into the client bundle at *build*
+  time, not read at container runtime — a platform runtime variable
+  would have silently had no effect, leaving the deployed frontend
+  calling `localhost:8000` no matter what was configured. Caught by
+  reading how Next.js actually handles these variables (not assumed),
+  fixed by accepting it as a Docker `ARG` and exporting it to `ENV`
+  before `npm run build` runs.
+- ✅ **`apps/api/railway.json` / `apps/web/railway.json`** — explicit
+  start commands per service. The API's matters most: `uvicorn` doesn't
+  read Railway's injected `$PORT` the way `next start` does, and
+  migrations need to run before the server accepts traffic — mirrors
+  `infra/docker-compose.yml`'s own `api` service command exactly
+  (`alembic upgrade head && uvicorn ...`), not a new pattern invented
+  for Railway specifically. The API's `railway.json` also points
+  Railway's healthcheck at the real `/api/v1/health` endpoint.
+- ✅ **A full runbook** added to docs/DEPLOYMENT.md: exact steps to
+  create the two services and the Postgres database, the real
+  `DATABASE_URL` gotcha (Railway's Postgres plugin gives
+  `postgresql://`, this app needs `postgresql+asyncpg://`), a table of
+  every environment variable each service needs and where its value
+  should come from (reuse the real existing R2/Anthropic/Gmail SMTP
+  values already verified in earlier rounds; generate a **new** real
+  `JWT_SECRET` rather than deploy on the insecure dev placeholder;
+  explicitly use Stripe **test-mode** keys for this deployment, not the
+  live key currently active in local `.env`, since the live account's
+  KYC is still incomplete and this isn't a public launch), the deploy
+  order (API first, since web's build needs its URL), and which
+  third-party dashboards need a redirect/webhook URL added (the OIDC
+  provider's authorized redirect URIs; Stripe's webhook endpoint).
+- **Not done, and can't be from here**: actually creating the Railway
+  project/services, provisioning the database, setting the real
+  environment variable values, or confirming the deployment is live —
+  all of that is the account holder's own next step, following the
+  runbook above. This section will get a real "deployed and verified"
+  addendum once that's done, not before.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —

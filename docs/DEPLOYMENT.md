@@ -128,3 +128,125 @@ allow-list need to sign in) is a separate, unstarted step.
   CRUD — still has no rate limiting of its own; put one at the load
   balancer/API gateway layer before exposing those publicly at any real
   scale.
+
+## Railway deployment (first real deployment — a runbook, not a claim it's been done)
+
+The account holder chose Railway for the first real deployment, deliberately
+scoped as a **private** environment first (a real URL to test and share, not
+a public launch) — Stripe live mode, legal review, and Google OAuth
+verification are all still open, see docs/CHECKLIST.md. This section is the
+exact runbook, written so it can actually be followed, not generic advice.
+
+**What an AI agent cannot do here, by design**: create the Railway account,
+enter billing details, or type real secret values (API keys, passwords,
+tokens) into Railway's dashboard. Those steps below are explicitly the
+account holder's own actions. Two code changes *were* made and committed to
+make this deployment actually work once those manual steps are done:
+
+- `apps/web/Dockerfile` now accepts `NEXT_PUBLIC_API_URL` as a Docker build
+  `ARG` — Next.js inlines `NEXT_PUBLIC_*` variables into the client bundle
+  at *build* time, not read at container runtime, so a plain Railway runtime
+  variable would have silently had no effect, leaving the deployed frontend
+  still calling `localhost:8000`. This was caught by reading how Next.js
+  actually handles these variables, not assumed.
+- `apps/api/railway.json` and `apps/web/railway.json` set each service's
+  real start command. The API's matters most: `uvicorn` doesn't read
+  Railway's injected `$PORT` automatically the way `next start` does, so it
+  has to be passed explicitly, and migrations have to run before the server
+  starts accepting traffic — mirroring `infra/docker-compose.yml`'s
+  `api` service command exactly: `python -m alembic upgrade head && uvicorn
+  app.main:app --host 0.0.0.0 --port $PORT`.
+
+### 1. Create the project and the two services
+
+1. Create a Railway account and a new project (account holder's own step).
+2. Add a service from the GitHub repo, **Root Directory** = `apps/api`.
+   Railway will detect `apps/api/railway.json` and `apps/api/Dockerfile`
+   automatically.
+3. Add a second service from the same repo, **Root Directory** =
+   `apps/web`.
+4. Add a **Postgres** database to the project (Railway's own managed
+   Postgres plugin, one click — this is the "managed Postgres" DEPLOYMENT.md
+   already calls for above).
+
+### 2. Database URL — the one real gotcha
+
+Railway's Postgres plugin gives you `DATABASE_URL` in `postgresql://...`
+form. This app uses **async** SQLAlchemy and needs the `+asyncpg` dialect
+in the scheme, or it will fail to connect. On the API service, set:
+
+```
+DATABASE_URL=postgresql+asyncpg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}
+```
+
+(Railway's variable-reference syntax — adjust the reference names to
+whatever your Postgres service is actually named in the project.) Do not
+just reference `${{Postgres.DATABASE_URL}}` directly — its scheme is
+`postgresql://`, not `postgresql+asyncpg://`.
+
+### 3. Environment variables — API service
+
+Reuse the real values already in `apps/api/.env` where noted; generate new
+ones where noted. Never paste real secret values into a chat with an AI
+agent — this list says *which* key to set and *where its value comes
+from*, not the value itself.
+
+| Variable | Value |
+|---|---|
+| `ENVIRONMENT` | `production` |
+| `DATABASE_URL` | built per step 2 above |
+| `JWT_SECRET` | a **new**, real secret — generate with `python3 -c "import secrets; print(secrets.token_urlsafe(64))"` and use that, not the local dev value (there isn't one set locally — the app silently runs on an insecure placeholder otherwise, see this file's "A real `JWT_SECRET`" note above) |
+| `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_REGION` | the real Cloudflare R2 values already in `apps/api/.env` — reusable as-is |
+| `LLM_PROVIDER`, `LLM_API_KEY` | the real Anthropic values already in `apps/api/.env` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS` | the real Gmail SMTP values already in `apps/api/.env` |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID_*` | **use the test-mode values**, not the live ones currently active in local `.env` — the real live Stripe account's business verification (KYC) is still incomplete (most payment methods disabled), and this is a private deployment, not a public launch. The test-mode values are the commented-out lines at the top of `apps/api/.env`. Switch to the real live values only once KYC is done and you're ready for Stripe webhooks to point at this deployment for real. |
+| `STRIPE_TAX_ENABLED` | `false` |
+| `FRONTEND_BASE_URL` | the web service's Railway URL once it's deployed (step 5) |
+| `CORS_ORIGINS` | `["https://<web service's Railway domain>"]` — a JSON array, pydantic-settings parses list env vars this way |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_DISCOVERY_URL` | decide which IdP you want live here — local `.env` currently has the Microsoft Entra ID test app's values, not Google's; either works, but whichever you choose needs its redirect URI updated (step 6) |
+| `OIDC_REDIRECT_URI` | `https://<web service's Railway domain>/sso/callback` |
+| `MALWARE_SCANNING_ENABLED` | leave `false` unless a clamd daemon is also deployed — not provisioned on Railway here |
+
+### 4. Environment variables — web service
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | the API service's Railway domain, e.g. `https://<api-service>.up.railway.app` — set this as a **Build Variable**, not just a runtime variable, per the Dockerfile change above. Deploy the API service first so you have its real URL before building web. |
+
+### 5. Deploy order
+
+Deploy the API service first (it needs no dependency on web). Once it's up,
+copy its public Railway domain into the web service's `NEXT_PUBLIC_API_URL`
+build variable and `FRONTEND_BASE_URL`/`CORS_ORIGINS` on the API service
+once web's own domain is known, then deploy web. A second redeploy of
+whichever service's dependency changed is normal here — this is a
+circular-ish dependency (API needs web's URL for CORS, web needs API's URL
+to build), not a mistake.
+
+### 6. Update third-party redirect/webhook URLs (manual, provider dashboards)
+
+- **OIDC provider** (Google Cloud Console or Entra ID app registration,
+  whichever you chose in step 3): add
+  `https://<web domain>/sso/callback` to the app's authorized redirect
+  URIs. The existing registration's redirect URI is `localhost:3000` —
+  real SSO login will fail here until this is added.
+- **Stripe webhook** (Stripe Dashboard → Developers → Webhooks, in test
+  mode since step 3 uses test keys): add an endpoint at
+  `https://<api domain>/api/v1/billing/webhook`, and copy its signing
+  secret into `STRIPE_WEBHOOK_SECRET` on the API service (replacing the
+  local dev one).
+
+### 7. After deploying
+
+- Visit `https://<api domain>/api/v1/health` — should return
+  `{"status": "ok"}`. If it doesn't, check the API service's deploy logs
+  in Railway for an `alembic upgrade head` failure before assuming the app
+  itself is broken.
+- Register a real account through the deployed web app and confirm a
+  verification email actually arrives (real SMTP, real inbox — don't trust
+  "send succeeded" logs alone, the Gmail quirk noted above is real).
+- This is a **private** deployment per the account holder's own choice —
+  don't link it from the real `datalume.co.uk` DNS or announce it
+  publicly until Stripe live mode, legal review, and Google OAuth
+  verification are actually resolved (see docs/CHECKLIST.md's "Immediate
+  next steps" list for the current state of each).
