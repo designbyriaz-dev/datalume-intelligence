@@ -14,21 +14,32 @@ sequence and its arguments by mocking smtplib.SMTP at the class level —
 the same "verify the real integration code path without a live
 account/server" approach used for Stripe's webhook signing and the SSO
 fake-IdP tests elsewhere in this codebase. What that does NOT prove: no
-message has been sent to, or received by, a real mailbox in this
-session. Set SMTP_HOST (+ SMTP_USERNAME/SMTP_PASSWORD if your provider
-requires auth) to actually exercise this for the first time — any
-standard SMTP provider works: Postmark, SendGrid's SMTP endpoint, AWS
-SES SMTP, Gmail, or a self-hosted server.
+message has been sent to, or received by, a real mailbox.
+
+SMTPEmailSender is unusable on this app's current host (Railway): a
+real deployment hit `OSError: [Errno 101] Network is unreachable`
+trying to open a raw socket to smtp.gmail.com:587 — Railway blocks
+outbound SMTP (ports 465/587) on its Free/Trial/Hobby plans, a
+widely-reported platform restriction, not a credentials or code bug
+(confirmed via Railway's own community forum). ResendEmailSender below
+exists for exactly this: it sends over Resend's HTTPS API instead of a
+raw SMTP socket, so it isn't subject to that port block. Prefer it for
+any deployment on a host that blocks outbound SMTP; SMTPEmailSender
+still works unmodified for self-hosted/VPS deployments or providers
+that don't block those ports.
 """
 
 from __future__ import annotations
 
+import base64
 import smtplib
 from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Protocol
+
+import httpx
 
 from app.core.config import get_settings
 
@@ -116,14 +127,58 @@ class SMTPEmailSender:
             server.sendmail(self._from_email, [message.to], mime.as_string())
 
 
+class ResendEmailSender:
+    """Sends over Resend's HTTPS API (api.resend.com) instead of a raw
+    SMTP socket — see this module's docstring for why that distinction
+    matters on this app's current host. A normal outbound HTTPS POST
+    isn't subject to the SMTP-port block, so this is a drop-in
+    unblocker, not a different feature."""
+
+    def __init__(self, *, api_key: str, from_email: str) -> None:
+        self._api_key = api_key
+        self._from_email = from_email
+
+    def send(self, message: EmailMessage) -> None:
+        payload: dict[str, object] = {
+            "from": self._from_email,
+            "to": [message.to],
+            "subject": message.subject,
+            "text": message.text_body,
+        }
+        if message.html_body:
+            payload["html"] = message.html_body
+        if message.attachments:
+            # Resend's API wants attachment content base64-encoded in the
+            # JSON body — there's no multipart upload path, unlike SMTP's
+            # MIME attachment above.
+            payload["attachments"] = [
+                {
+                    "filename": attachment.filename,
+                    "content": base64.b64encode(attachment.content).decode("ascii"),
+                }
+                for attachment in message.attachments
+            ]
+
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+
+
 def get_email_sender() -> EmailSender:
     settings = get_settings()
+    if settings.resend_api_key:
+        return ResendEmailSender(api_key=settings.resend_api_key, from_email=settings.smtp_from_email)
     if not settings.smtp_host:
         raise EmailNotConfiguredError(
             "Transactional email is scaffolded (verification/reset/invite logic is "
-            "tested) but no SMTP provider is connected — set SMTP_HOST (and "
-            "SMTP_USERNAME/SMTP_PASSWORD if your provider requires auth). "
-            "See docs/CHECKLIST.md."
+            "tested) but no email provider is connected — set RESEND_API_KEY (preferred "
+            "on hosts that block outbound SMTP, e.g. Railway's Free/Trial/Hobby plans), "
+            "or SMTP_HOST (and SMTP_USERNAME/SMTP_PASSWORD if your provider requires "
+            "auth) for a host that allows raw SMTP. See docs/CHECKLIST.md."
         )
     return SMTPEmailSender(
         host=settings.smtp_host,

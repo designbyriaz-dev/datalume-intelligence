@@ -5104,6 +5104,55 @@ actually created this time. The fix going forward: always open "Details"
 on a pending-changes banner and read exactly what's staged before
 clicking Deploy, not just trust the API/web service rows being edited.
 
+## Post-Phase-7: first real end-to-end test of the deployment, and a real SMTP-on-Railway bug found and fixed
+
+With all the real secrets above deployed, ran an actual end-to-end test
+against the live system rather than trusting the deploy succeeded —
+registered a real account through
+`https://web-production-fcfc.up.railway.app`, logged in with password,
+and separately completed a real Google SSO round-trip. All three
+succeeded for real, confirmed via the api service's own deploy logs:
+
+- ✅ `POST /api/v1/auth/register` → `201 Created`, `POST
+  /api/v1/auth/login` → `200 OK`, `POST /api/v1/sso/callback` → `200
+  OK`, each followed by authenticated `200 OK` calls to `/users/me`,
+  `/billing/subscription`, `/organizations`, `/workspaces`,
+  `/industry-packs` — real proof the JWT/database/Stripe-test-mode/
+  Google-OIDC wiring all work together, not just that each piece was
+  configured.
+- ✅ **Google SSO's `redirect_uri_mismatch` fixed**: the Google Cloud
+  OAuth client (`datalume-dev`, project `flawless-energy-511509-a4`,
+  under the `support@datalume.co.uk` Google account — not the
+  `designbyriaz@gmail.com` account's projects, which don't have this
+  client) didn't have the production callback registered. Added
+  `https://web-production-fcfc.up.railway.app/sso/callback` to its
+  Authorized redirect URIs, alongside the existing
+  `http://localhost:3000/sso/callback` for local dev.
+- ❌→✅ **A real bug found via this test, not assumed**: "Resend
+  verification email" returned "Could not send verification email."
+  The api logs showed the real cause: `OSError: [Errno 101] Network is
+  unreachable` when `SMTPEmailSender` tried to open a raw socket to
+  `smtp.gmail.com:587`. This is **not** a credentials or code problem —
+  Railway blocks outbound SMTP (ports 465/587) on its Free/Trial/Hobby
+  plans, a widely-reported platform restriction (confirmed via
+  Railway's own community forum, station.railway.com). The original
+  registration email never had a chance to send either — silently,
+  since `app/api/v1/routers/auth.py`'s register handler treats sending
+  as best-effort (`except Exception: pass`, no logging) — so this
+  would have gone unnoticed without the resend-verification test
+  surfacing a real `503`.
+  - **Fix**: added `ResendEmailSender` to `app/services/email.py` —
+    sends over Resend's HTTPS API instead of a raw SMTP socket, so it
+    isn't subject to the port block. `get_email_sender()` now prefers
+    `RESEND_API_KEY` over `SMTP_HOST` when both are set.
+    `SMTPEmailSender` is untouched and still correct for a host that
+    doesn't block outbound SMTP. Real tests added in
+    `tests/test_email.py` mirroring the existing SMTP tests' "mock at
+    the library call level" approach — mocking `httpx.post` instead of
+    `smtplib.SMTP`. **Not yet deployed**: needs a real `RESEND_API_KEY`
+    set on the api service (the account holder's own step, same
+    secret-entry boundary as every other credential this session).
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —

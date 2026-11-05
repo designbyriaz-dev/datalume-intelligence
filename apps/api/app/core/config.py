@@ -113,9 +113,16 @@ class Settings(BaseSettings):
     # Transactional email (app/services/email.py). Blocks three otherwise-
     # finished features until set: email verification, password reset, and
     # organization invites to not-yet-registered users. Left unset until
-    # real SMTP credentials are supplied — same honest-gating pattern as
-    # Stripe/LLM/OIDC above. Works with any standard SMTP provider
-    # (Postmark, SendGrid's SMTP endpoint, AWS SES SMTP, your own server).
+    # real credentials are supplied — same honest-gating pattern as
+    # Stripe/LLM/OIDC above.
+    #
+    # RESEND_API_KEY takes priority over SMTP_HOST when both are set.
+    # Prefer it on a host that blocks outbound SMTP (confirmed true for
+    # Railway's Free/Trial/Hobby plans — see app/services/email.py's
+    # module docstring); SMTP_HOST still works for a self-hosted/VPS
+    # deployment or a provider that allows raw SMTP (Postmark, SendGrid's
+    # SMTP endpoint, AWS SES SMTP, your own server).
+    resend_api_key: str | None = None
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
