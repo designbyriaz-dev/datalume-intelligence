@@ -5086,6 +5086,23 @@ against the real running system, not assumed:
   end-to-end flow (register, verify email, log in, SSO, a real payment)
   has been exercised against the deployed system yet — that needs those
   secrets filled in first.
+- ✅ **`SMTP_FROM_EMAIL` corrected**: was still the dev placeholder
+  `no-reply@datalume.example` (an earlier attempt to fix it hadn't
+  actually landed before a session interruption) — now set to the real
+  `designbyriaz@gmail.com` display address. Doesn't make outbound email
+  work by itself (`SMTP_HOST`/`SMTP_USERNAME`/`SMTP_PASSWORD` are still
+  entirely unset — the account holder's own step), just stops a wrong
+  from-address being used once they are.
+
+**A caught mistake, for the record**: while editing variables in the
+Railway dashboard a second time, a stray click sequence again staged the
+creation of an unrelated Hono/Bun "function-bun" service (the same
+accidental-service bug seen once already during the original setup, see
+above) — caught via the "Apply N changes" review step before deploying
+and discarded without ever reaching the live project. No service was
+actually created this time. The fix going forward: always open "Details"
+on a pending-changes banner and read exactly what's staged before
+clicking Deploy, not just trust the API/web service rows being edited.
 
 ## Known limitations in what's built
 
