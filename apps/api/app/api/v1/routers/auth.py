@@ -382,7 +382,7 @@ async def logout(response: Response) -> None:
     either way) — logout only needs to stop the browser from presenting
     its credential, which clearing these cookies achieves. The frontend
     pairs this with dropping its in-memory access token."""
-    clear_auth_cookies(response)
+    clear_auth_cookies(response, get_settings())
 
 
 @router.post("/verify-email", response_model=UserOut, dependencies=[Depends(_verify_email_rate_limit)])

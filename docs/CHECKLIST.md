@@ -5149,9 +5149,65 @@ succeeded for real, confirmed via the api service's own deploy logs:
     doesn't block outbound SMTP. Real tests added in
     `tests/test_email.py` mirroring the existing SMTP tests' "mock at
     the library call level" approach — mocking `httpx.post` instead of
-    `smtplib.SMTP`. **Not yet deployed**: needs a real `RESEND_API_KEY`
-    set on the api service (the account holder's own step, same
-    secret-entry boundary as every other credential this session).
+    `smtplib.SMTP`. Deployed, `RESEND_API_KEY` set, verified sending a
+    real email end-to-end.
+- ✅ **Resend domain verified**: `mail.datalume.co.uk` (a subdomain,
+  not the root `datalume.co.uk` — the root is currently parked with no
+  conflicting MX records, so this wasn't strictly required, but it's
+  Resend's own recommended default and keeps transactional-email
+  reputation isolated from the root domain regardless). DKIM TXT +
+  2 SPF CNAME records added at the real GoDaddy DNS zone for
+  `datalume.co.uk`; verified within ~15 minutes.
+- ✅ **The verification email itself fixed, not just the send path**:
+  it arrived, but reported as landing in Junk and "looking like a
+  security risk" — every transactional link email in this app
+  (verification ×2, password reset, org invite) was plain text with a
+  bare pasted URL, a shape spam filters and readers alike treat as a
+  phishing signal. Added `branded_cta_email_html`
+  (`app/services/email_templates.py`) — simple table-based HTML with
+  DataLume branding and a real button, raw URL kept only as a muted
+  fallback — applied to all four. Also set a proper `SMTP_FROM_EMAIL`
+  display name (`DataLume Intelligence <no-reply@mail.datalume.co.uk>`
+  instead of a bare address). Honestly caveated: a freshly-verified
+  sending domain still has zero reputation, which these fixes don't
+  manufacture — that only builds over real send volume and time.
+- ✅ **A second real, independent bug found and fixed in the same
+  pass**: investigating why the web app kept silently logging users
+  out turned up a genuine cookie-configuration bug, not something
+  caused by the email work. `app/core/cookies.py` set the refresh/CSRF
+  cookies with `SameSite=Lax` unconditionally. In production, this
+  app's frontend and API are deployed on different Railway subdomains
+  — if `up.railway.app` is itself a registered public suffix (the
+  normal reason a multi-tenant PaaS does this, to stop cross-tenant
+  cookie leakage), those subdomains are cross-site to each other
+  despite sharing a literal domain ending, and a `Lax` cookie is never
+  sent on cross-site `fetch`/XHR at all — only top-level navigation.
+  That silently killed every session on its first cross-origin
+  request, which is exactly the repeated "logged out again" behavior
+  hit throughout this session's live testing.
+  - **Fix**: `SameSite` now follows the existing `Secure` flag
+    (`environment == "production"`) instead of being hardcoded — `None`
+    in production (the genuinely cross-site case), `Lax` in local dev
+    (same-site on `localhost`, where `None` would need `Secure` and
+    silently fail over plain HTTP anyway). Safe because `/refresh`'s
+    cookie path already independently enforces the double-submit CSRF
+    check (`app/api/v1/routers/auth.py`) regardless of `SameSite` — that
+    check was always the real forgery protection, not `SameSite`,
+    which was redundant defense-in-depth here. Also fixed a related,
+    previously-latent bug while touching this: `clear_auth_cookies`
+    (logout) called `delete_cookie` without matching
+    `secure`/`samesite`, which Starlette defaults to `False`/`"lax"` —
+    since those attributes are part of a cookie's identity in the
+    browser's jar, that would have set a *different* cookie rather
+    than clearing the real `Secure`+`None` one in production, leaving
+    logout silently non-functional the first time it was tried for
+    real. Confirmed CORS (`allow_credentials=True`, origin-scoped, not
+    wildcarded) and the frontend's `fetch(..., {credentials: "include"})`
+    were already both correct — this was purely the cookie-attribute
+    bug. New tests in `tests/test_cookies.py` cover both environments
+    and the delete-cookie attribute match directly, since
+    `tests/test_auth.py`'s client only ever runs under dev settings and
+    wouldn't have caught the production-only failure mode.
 
 ## Known limitations in what's built
 
