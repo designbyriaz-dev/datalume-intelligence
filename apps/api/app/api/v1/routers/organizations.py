@@ -1,4 +1,5 @@
 import csv
+import html
 import io
 import re
 import uuid
@@ -31,6 +32,7 @@ from app.services import billing
 from app.services.audit import record_audit_event
 from app.services.authz import require_membership, require_org_manager
 from app.services.email import EmailMessage, EmailSender
+from app.services.email_templates import branded_cta_email_html
 from app.services.email_tokens import EmailTokenError, create_org_invite_token, peek_token
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
@@ -166,6 +168,14 @@ async def invite_member(
                     f"{current_user.full_name} invited you to join {org.name} as {role.value}.\n\n"
                     f"Accept the invite and create your account:\n{invite_url}\n\n"
                     "This link expires in 7 days."
+                ),
+                html_body=branded_cta_email_html(
+                    heading="You've been invited",
+                    intro_html=f"<strong>{html.escape(current_user.full_name)}</strong> invited you to join "
+                    f"<strong>{html.escape(org.name)}</strong> on DataLume Intelligence as {html.escape(role.value)}.",
+                    button_label="Accept invite",
+                    button_url=invite_url,
+                    footer_note="This link expires in 7 days. If you weren't expecting this, you can ignore this email.",
                 ),
             )
         )

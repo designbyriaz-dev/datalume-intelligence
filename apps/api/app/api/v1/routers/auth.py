@@ -1,3 +1,5 @@
+import html
+
 import pyotp
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -44,6 +46,7 @@ from app.schemas.auth import (
 from app.schemas.user import UserOut
 from app.services.audit import record_audit_event
 from app.services.email import EmailMessage, EmailSender
+from app.services.email_templates import branded_cta_email_html
 from app.services.email_tokens import (
     EmailTokenError,
     consume_token,
@@ -145,6 +148,14 @@ async def register(
                         f"Welcome to DataLume Intelligence, {user.full_name}.\n\n"
                         f"Verify your email address:\n{verify_url}\n\n"
                         "This link expires in 24 hours."
+                    ),
+                    html_body=branded_cta_email_html(
+                        heading="Verify your email",
+                        intro_html=f"Welcome to DataLume Intelligence, {html.escape(user.full_name)}. "
+                        "Confirm this is your email address to finish setting up your account.",
+                        button_label="Verify email",
+                        button_url=verify_url,
+                        footer_note="This link expires in 24 hours. If you didn't create this account, you can ignore this email.",
                     ),
                 )
             )
@@ -420,6 +431,13 @@ async def resend_verification(
             to=user.email,
             subject="Verify your DataLume Intelligence account",
             text_body=f"Verify your email address:\n{verify_url}\n\nThis link expires in 24 hours.",
+            html_body=branded_cta_email_html(
+                heading="Verify your email",
+                intro_html="Confirm this is your email address to finish setting up your DataLume Intelligence account.",
+                button_label="Verify email",
+                button_url=verify_url,
+                footer_note="This link expires in 24 hours. If you didn't request this, you can ignore this email.",
+            ),
         )
     )
     await db.commit()
@@ -448,6 +466,13 @@ async def forgot_password(
             to=user.email,
             subject="Reset your DataLume Intelligence password",
             text_body=f"Reset your password:\n{reset_url}\n\nThis link expires in 1 hour. If you didn't request this, ignore it.",
+            html_body=branded_cta_email_html(
+                heading="Reset your password",
+                intro_html="We received a request to reset the password for your DataLume Intelligence account.",
+                button_label="Reset password",
+                button_url=reset_url,
+                footer_note="This link expires in 1 hour. If you didn't request this, you can safely ignore this email — your password won't change.",
+            ),
         )
     )
     await db.commit()
