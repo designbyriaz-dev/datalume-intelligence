@@ -5041,6 +5041,52 @@ new "Railway deployment" section rather than left vague. What *was* done:
   runbook above. This section will get a real "deployed and verified"
   addendum once that's done, not before.
 
+### Addendum: deployed and independently verified (private, not public)
+
+The account holder created the Railway project, Postgres database, and
+both services themselves, and authorized this agent to configure them —
+same account-creation/billing/secret-entry boundary as above, strictly
+observed throughout. What's now genuinely live and independently checked
+against the real running system, not assumed:
+
+- ✅ **Both services are `ACTIVE` with real public domains**:
+  `api-production-da93.up.railway.app` and
+  `web-production-fcfc.up.railway.app`. `GET /api/v1/health` on the API
+  domain returns the literal `{"status":"ok"}` — fetched directly, not
+  inferred from Railway's own status badge.
+- ✅ **A second real deployability bug found and fixed, independent of the
+  Dockerfile issue above**: Railway's build-time dependency scanner
+  refused to build the web service outright —
+  `next@14.2.15` matched two HIGH-severity CVEs (CVE-2025-55184,
+  CVE-2025-67779). Upgraded to `next@14.2.35` (the exact patched version
+  Railway's own scan recommended), verified a clean local production
+  build, and confirmed the upgrade didn't change output shape (same
+  route list, no new warnings).
+- ✅ **The `NEXT_PUBLIC_API_URL` Dockerfile fix verified for real, not just
+  reasoned about**: the deployed web app's client JS bundle was fetched
+  and grepped directly — it contains `api-production-da93...` and
+  contains no `localhost:8000` anywhere. This is the first empirical
+  confirmation that fix actually works in Railway's Docker build, not
+  just locally.
+- ✅ **CORS verified live, not just configured**: `CORS_ORIGINS`,
+  `FRONTEND_BASE_URL`, and `OIDC_REDIRECT_URI` on the api service were
+  updated from their `localhost:3000` defaults to the real web domain,
+  then a cross-origin `fetch()` was run from a page actually loaded on
+  `web-production-fcfc.up.railway.app` against the api domain's health
+  endpoint — it returned a real `200` with a readable body, which is
+  only possible if the browser's CORS check passed.
+- ❌ **Still not done** (the account holder's own remaining steps, same
+  boundary as always): `S3_ACCESS_KEY`/`S3_SECRET_KEY` on the api service
+  currently hold the wrong MinIO dev-placeholder values (not the real R2
+  credentials) — confirmed via a real recurring error in the live deploy
+  logs (`botocore.exceptions.ClientError: ... Credential access key has
+  length 8, should be 32`) from the in-process scheduled-report job.
+  `JWT_SECRET` is still the insecure dev default. Stripe keys, OIDC
+  credentials, and SMTP credentials are all still placeholder/unset. No
+  end-to-end flow (register, verify email, log in, SSO, a real payment)
+  has been exercised against the deployed system yet — that needs those
+  secrets filled in first.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
