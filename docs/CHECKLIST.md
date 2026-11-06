@@ -5209,6 +5209,44 @@ succeeded for real, confirmed via the api service's own deploy logs:
     `tests/test_auth.py`'s client only ever runs under dev settings and
     wouldn't have caught the production-only failure mode.
 
+## Post-Phase-7: Google SSO test users and a real ClamAV attempt (found resource-infeasible, not deployed)
+
+- ✅ **Google OAuth consent screen test users added**: the app's OAuth
+  client (`datalume-dev`) remains in Google's "Testing" status by
+  deliberate choice (publishing to open sign-in to any Google account
+  is a real decision, not made this round) — added
+  `designbyriaz@gmail.com` and `may25thinvestments@gmail.com` to the
+  test-user allow-list in the Google Auth Platform console so both
+  accounts can complete Google SSO against the real production client
+  without needing the app published.
+- ❌ **ClamAV malware scanning: attempted, found infeasible on
+  Railway's Trial plan, left disabled**. Deployed a `clamav` service
+  (`clamav/clamav:stable` Docker image, `CLAMAV_NO_MILTERD=true`) to
+  back the already-built `ClamdMalwareScanner`
+  (`app/services/malware_scanning.py`). `freshclam` successfully
+  downloaded and verified the real virus-signature databases, but
+  `clamd` itself never came up: the deploy logs show a continuous
+  "Socket for clamd not found yet, retrying" loop that reached 1636 of
+  its 1800-retry budget before the log stream went silent and the
+  deployment flipped to `CRASHED` — no clean error, consistent with an
+  OOM kill. The Metrics tab confirms this wasn't just slow: CPU spiked
+  briefly at container start then flatlined near zero, and **memory
+  stayed flat at 0 B** for the entire ~5.5-hour run, even though a
+  working `clamd` should show sustained CPU while loading ~190MB of
+  signatures into RAM and sitting well above 0 B once loaded. This is a
+  real resource ceiling on the Trial plan, not a configuration bug —
+  flagged to the account holder as the same cost/resource risk raised
+  before provisioning, who chose to leave malware scanning disabled for
+  now rather than upgrade the plan or retune the scan config.
+  `MALWARE_SCANNING_ENABLED` confirmed still `false` on the api service
+  (verified directly in Railway's variable list, not assumed); the
+  crashed `clamav` service was left in place rather than deleted, since
+  it isn't consuming active compute while crashed. `CLAMD_HOST`/
+  `CLAMD_PORT` variables exist on the api service from this attempt but
+  are inert while scanning stays disabled. Revisit only after a plan
+  upgrade or a deliberately lighter scan config — see the "What's left"
+  list below.
+
 ## Known limitations in what's built
 
 - ~~Token storage: the frontend stores the JWT in `localStorage`~~ —
@@ -5418,3 +5456,10 @@ succeeded for real, confirmed via the api service's own deploy logs:
     pricing/tier restructure, and the six further industry packs listed
     in the plan's "Later" phase — each needs real domain input from the
     user first, same as every pack built so far.
+24. **Malware scanning (ClamAV)**: attempted and found infeasible on
+    Railway's Trial plan — see "Post-Phase-7: Google SSO test users and
+    a real ClamAV attempt" above. `clamd` never started (resource
+    starvation, not a config bug); left `MALWARE_SCANNING_ENABLED=false`
+    on the account holder's explicit choice rather than upgrade the
+    Railway plan or retune the scan config. Revisit if/when the plan is
+    upgraded.
