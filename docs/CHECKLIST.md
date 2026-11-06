@@ -5465,15 +5465,79 @@ discussion that led to this being written up rather than attempted).
   Microsoft Entra ID — see the updated Phase 7 "SSO via OIDC" section
   above, including a real cross-provider interop bug that run caught
   and fixed (Microsoft's ID token omits `email_verified` entirely,
-  unlike Google). Okta remains untried. The Google app itself is still
-  in "Testing" publishing status with a single whitelisted test user —
-  see docs/DEPLOYMENT.md.
+  unlike Google). Okta remains untried — see "Next step: Okta SSO setup
+  checklist" below for exactly what's needed to try it. The Google app
+  itself is still in "Testing" publishing status with a single
+  whitelisted test user — see docs/DEPLOYMENT.md.
 - ~~Personal (non-org) subscription plan changes aren't audit-logged~~ —
   done, see "Post-Phase-7: personal subscription plan changes now
   audit-logged" below.
 - **No SCIM provisioning, no custom roles beyond the fixed five, no
   production deployment manifest** (Kubernetes/Terraform/etc.) — see the
   Phase 7 section above for why each was scoped out this round.
+
+### Next step: Okta SSO setup checklist (not attempted — needs the account holder's own Okta org)
+
+Drafted against the real implementation (`app/services/sso.py`,
+`app/core/config.py`'s `oidc_client_id`/`oidc_client_secret`/
+`oidc_discovery_url`/`oidc_redirect_uri`), not generic OIDC docs, so it
+matches what's actually built. Same honesty boundary as Google and
+Microsoft Entra ID above: this session can write the checklist but
+cannot create an Okta org or app registration on the account holder's
+behalf.
+
+**Constraint to know before starting**: SSO config here is
+single-provider — `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`/
+`OIDC_DISCOVERY_URL` is one set of env vars, not a per-provider list.
+Testing Okta means temporarily replacing the live Google config, not
+adding a second option alongside it (the code doesn't support running
+two providers at once). Test against a local/dev `.env` first, not by
+swapping Railway's production variables, so a real user mid-login via
+Google isn't broken by the swap.
+
+1. Create a free Okta Developer org at `developer.okta.com` (the
+   account holder's own account — the one genuinely-theirs step, same
+   as the Google Cloud Console project and the Azure AD tenant before
+   it).
+2. Okta Admin console → **Applications → Create App Integration** →
+   sign-in method **OIDC - OpenID Connect**, application type **Web
+   Application**.
+3. Configure the app:
+   - Grant type: **Authorization Code** (this codebase's PKCE/S256
+     flow works with Okta's standard web-app type, no extra config
+     needed on Okta's side).
+   - Sign-in redirect URI: `{frontend_base_url}/sso/callback` (e.g.
+     `http://localhost:3000/sso/callback` for local testing) — matches
+     `oidc_redirect_uri`'s existing default, so that env var can stay
+     unset if it matches.
+   - Sign-out redirect URI: optional, can point at the frontend base
+     URL.
+   - Assign the app to a test user/group — Okta apps start
+     access-restricted, the same "Testing" gate Google and Microsoft
+     both needed.
+4. Copy the **Client ID**/**Client secret** from the app's General tab
+   into `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`.
+5. Discovery URL: `https://{yourOktaDomain}/.well-known/openid-configuration`
+   (the org authorization server — simplest option, no custom
+   authorization server needed) → `OIDC_DISCOVERY_URL`.
+6. **Claim to verify specifically**: `sso.py` requires
+   `email_verified: true` only when that claim is present at all (it
+   already tolerates Microsoft's ID tokens, which omit it entirely —
+   see the addendum above). Okta's org authorization server does send
+   `email_verified` when the `email` scope is requested, so confirm
+   during testing that a real login's ID token carries
+   `email_verified: true` for the test user; if Okta ever sends
+   `false` for an unverified Okta profile email, a refused login is the
+   existing code working as intended, not a bug to chase.
+7. Run one real login end-to-end (`GET /api/v1/sso/login` → Okta's real
+   sign-in page → `/sso/callback` → `/dashboard`), then **reload the
+   page** to confirm the session survives — this exact step caught a
+   real httpOnly-cookie bug for both Google and Microsoft, so it is not
+   optional.
+8. Confirm a real `User` row is created with Okta's name/email, then
+   switch `OIDC_*` back to the live Google values once done, since
+   production should keep using the provider real users are already
+   authenticated against.
 
 ## Immediate next steps (suggested, not started)
 
