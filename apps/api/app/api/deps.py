@@ -18,6 +18,8 @@ from app.services.email import get_email_sender as _get_email_sender
 from app.services.rate_limit import check_rate_limit
 from app.services.storage import ObjectStorage, get_storage
 from app.services.stripe_billing import BillingNotConfiguredError, StripeBillingClient
+from app.services.stripe_connect import RentCollectionNotConfiguredError, StripeConnectClient
+from app.services.stripe_connect import get_stripe_connect_client as _get_stripe_connect_client
 from app.services.stripe_billing import get_stripe_client as _get_stripe_client
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
@@ -97,6 +99,18 @@ def get_stripe_client_dep() -> StripeBillingClient:
     try:
         return _get_stripe_client()
     except BillingNotConfiguredError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+
+def get_stripe_connect_client_dep() -> StripeConnectClient:
+    """Same pattern as get_stripe_client_dep, for Rent Collection's
+    Stripe Connect client. See app/api/v1/routers/rent_collection.py
+    for why callers must list the authz dependency BEFORE this one in
+    their parameter list — same ordering fix as
+    billing.py's _require_checkout_access."""
+    try:
+        return _get_stripe_connect_client()
+    except RentCollectionNotConfiguredError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
 

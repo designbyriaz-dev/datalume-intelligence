@@ -20,6 +20,13 @@ from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
 from app.models.property import LedgerEntryType, Property, RentFrequency, RentLedgerEntry, Tenancy, TenancyStatus
 from app.models.rate_limit import RateLimitWindow
+from app.models.rent_collection import (
+    ConnectAccountStatus,
+    ProcessedWebhookEvent,
+    RentPaymentRequest,
+    RentPaymentRequestStatus,
+    WorkspaceStripeAccount,
+)
 from app.models.report import Report
 from app.models.saved_scenario import SavedScenario
 from app.models.scheduled_report import ScheduledReport
@@ -80,4 +87,9 @@ __all__ = [
     "MaintenanceStatus",
     "ComplianceRule",
     "ComplianceCheckType",
+    "WorkspaceStripeAccount",
+    "ConnectAccountStatus",
+    "RentPaymentRequest",
+    "RentPaymentRequestStatus",
+    "ProcessedWebhookEvent",
 ]

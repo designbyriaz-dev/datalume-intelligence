@@ -15,6 +15,7 @@ import {
   type MaintenancePriority,
   type MaintenanceRequest,
   type MaintenanceStatus,
+  type PaymentRequest,
   type Property,
   type PropertyDocument,
   type RentLedgerEntry,
@@ -555,6 +556,8 @@ function DocumentsPanel({ propertyId, tenancies, token }: { propertyId: string; 
 function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
   const [entries, setEntries] = useState<RentLedgerEntry[] | null>(null);
   const [balance, setBalance] = useState<TenancyBalance | null>(null);
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  const [requestingPaymentFor, setRequestingPaymentFor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [entryType, setEntryType] = useState<RentLedgerEntry["entry_type"]>("charge");
@@ -568,12 +571,14 @@ function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
 
   const load = useCallback(async () => {
     try {
-      const [entryList, balanceResult] = await Promise.all([
+      const [entryList, balanceResult, requestList] = await Promise.all([
         api.listLedgerEntries(token, tenancy.id),
         api.getTenancyBalance(token, tenancy.id),
+        api.listPaymentRequests(token, tenancy.id),
       ]);
       setEntries(entryList);
       setBalance(balanceResult);
+      setPaymentRequests(requestList);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load the ledger.");
     }
@@ -606,6 +611,19 @@ function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
       setError(err instanceof ApiError ? err.message : "Could not add ledger entry.");
     } finally {
       setAdding(false);
+    }
+  };
+
+  const onRequestPayment = async (ledgerEntryId: string) => {
+    setRequestingPaymentFor(ledgerEntryId);
+    setError(null);
+    try {
+      await api.requestPayment(token, ledgerEntryId);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not request payment.");
+    } finally {
+      setRequestingPaymentFor(null);
     }
   };
 
@@ -717,17 +735,42 @@ function TenancyCard({ tenancy, token }: { tenancy: Tenancy; token: string }) {
                 <th className="pr-4 py-1">Type</th>
                 <th className="pr-4 py-1">Amount</th>
                 <th className="pr-4 py-1">Description</th>
+                <th className="pr-4 py-1">Payment</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.id} className="border-t border-slate-200 dark:border-slate-800">
-                  <td className="pr-4 py-1">{new Date(entry.entry_date).toLocaleDateString()}</td>
-                  <td className="pr-4 py-1 capitalize">{entry.entry_type}</td>
-                  <td className="pr-4 py-1">£{entry.amount_gbp.toFixed(2)}</td>
-                  <td className="pr-4 py-1 text-slate-500">{entry.description ?? "—"}</td>
-                </tr>
-              ))}
+              {entries.map((entry) => {
+                const request = paymentRequests.find((r) => r.ledger_entry_id === entry.id);
+                return (
+                  <tr key={entry.id} className="border-t border-slate-200 dark:border-slate-800">
+                    <td className="pr-4 py-1">{new Date(entry.entry_date).toLocaleDateString()}</td>
+                    <td className="pr-4 py-1 capitalize">{entry.entry_type}</td>
+                    <td className="pr-4 py-1">£{entry.amount_gbp.toFixed(2)}</td>
+                    <td className="pr-4 py-1 text-slate-500">{entry.description ?? "—"}</td>
+                    <td className="pr-4 py-1">
+                      {entry.entry_type !== "charge" ? (
+                        "—"
+                      ) : request?.status === "paid" ? (
+                        <span className="text-green-600">Paid ✓</span>
+                      ) : request?.status === "pending" ? (
+                        <span className="text-slate-500">Requested</span>
+                      ) : (
+                        <button
+                          onClick={() => onRequestPayment(entry.id)}
+                          disabled={requestingPaymentFor === entry.id}
+                          className="rounded border border-slate-300 px-2 py-0.5 text-xs hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+                        >
+                          {requestingPaymentFor === entry.id
+                            ? "Requesting…"
+                            : request?.status === "expired"
+                              ? "Resend"
+                              : "Request payment"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -1031,6 +1074,7 @@ export default function PropertyDetailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [tenantName, setTenantName] = useState("");
+  const [tenantEmail, setTenantEmail] = useState("");
   const [rentAmount, setRentAmount] = useState("");
   const [rentFrequency, setRentFrequency] = useState<Tenancy["rent_frequency"]>("monthly");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
@@ -1071,11 +1115,13 @@ export default function PropertyDetailPage() {
     try {
       await api.createTenancy(token, propertyId, {
         tenant_name: tenantName,
+        tenant_email: tenantEmail || undefined,
         rent_amount_gbp: value,
         rent_frequency: rentFrequency,
         start_date: startDate,
       });
       setTenantName("");
+      setTenantEmail("");
       setRentAmount("");
       await loadTenancies();
     } catch (err) {
@@ -1121,6 +1167,16 @@ export default function PropertyDetailPage() {
                 required
                 value={tenantName}
                 onChange={(e) => setTenantName(e.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium">Tenant email (optional)</label>
+              <input
+                type="email"
+                value={tenantEmail}
+                onChange={(e) => setTenantEmail(e.target.value)}
+                placeholder="Needed to request payment online"
                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
               />
             </div>

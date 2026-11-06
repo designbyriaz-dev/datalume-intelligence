@@ -17,6 +17,7 @@ from app.api.v1.routers import (
     maintenance,
     organizations,
     properties,
+    rent_collection,
     reports,
     saved_scenarios,
     scheduled_reports,
@@ -50,3 +51,4 @@ api_router.include_router(documents.router)
 api_router.include_router(inventories.router)
 api_router.include_router(maintenance.router)
 api_router.include_router(compliance.router)
+api_router.include_router(rent_collection.router)

@@ -5,7 +5,95 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { useAuth } from "@/lib/auth";
-import { api, ApiError, type Property, type PropertyKPIs } from "@/lib/api";
+import { api, ApiError, type ConnectAccount, type Property, type PropertyKPIs } from "@/lib/api";
+
+function RentCollectionCard({ workspaceId, token }: { workspaceId: string; token: string }) {
+  const [account, setAccount] = useState<ConnectAccount | "none" | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setAccount(await api.getConnectAccount(token, workspaceId));
+    } catch (err) {
+      // No Stripe Connect account yet is an expected, non-error state —
+      // the backend 404s until "Connect bank account" is clicked.
+      if (err instanceof ApiError && err.status === 404) {
+        setAccount("none");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Could not load rent collection status.");
+      }
+    }
+  }, [token, workspaceId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const onConnect = async () => {
+    setConnecting(true);
+    setError(null);
+    try {
+      const { onboarding_url } = await api.createConnectAccount(token, workspaceId);
+      window.location.href = onboarding_url;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not start Stripe onboarding.");
+      setConnecting(false);
+    }
+  };
+
+  const onResumeOnboarding = async () => {
+    setConnecting(true);
+    setError(null);
+    try {
+      const { onboarding_url } = await api.refreshConnectOnboardingLink(token, workspaceId);
+      window.location.href = onboarding_url;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not resume Stripe onboarding.");
+      setConnecting(false);
+    }
+  };
+
+  if (account === null) return null;
+
+  return (
+    <div className="mt-6 rounded-lg border border-slate-200 p-5 dark:border-slate-800">
+      <h2 className="font-medium">Rent collection</h2>
+      {account === "none" ? (
+        <>
+          <p className="mt-1 text-sm text-slate-500">
+            Connect a Stripe account to let tenants pay a rent charge online — you&rsquo;ll still record every
+            payment by hand in the ledger below until this is connected.
+          </p>
+          <button
+            onClick={onConnect}
+            disabled={connecting}
+            className="mt-3 rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+          >
+            {connecting ? "Starting…" : "Connect bank account"}
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-sm">
+            Status: <span className="font-medium capitalize">{account.status}</span>
+            {!account.charges_enabled && " — not yet able to accept payments."}
+          </p>
+          {!account.charges_enabled && (
+            <button
+              onClick={onResumeOnboarding}
+              disabled={connecting}
+              className="mt-3 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:border-brand-500 disabled:opacity-50 dark:border-slate-700"
+            >
+              {connecting ? "Opening…" : "Finish Stripe setup"}
+            </button>
+          )}
+        </>
+      )}
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
 
 function PropertyKpiRow({ kpis }: { kpis: PropertyKPIs }) {
   const tiles: { label: string; value: string }[] = [
@@ -111,11 +199,14 @@ export default function PropertiesPage() {
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">Properties & rent ledger</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Manual rent-ledger records — no payment collection happens here. See a tenancy&rsquo;s page to
-          record a charge, payment, refund, or adjustment by hand.
+          Rent-ledger records are always entered by hand here. Connect Stripe below to additionally send a
+          tenant a payment link for a specific charge — see a tenancy&rsquo;s page to record a charge,
+          payment, refund, or adjustment, or to request payment for one.
         </p>
 
         {kpis && <PropertyKpiRow kpis={kpis} />}
+
+        {token && <RentCollectionCard workspaceId={workspaceId} token={token} />}
 
         <form onSubmit={onCreate} className="mt-8 space-y-3 rounded-lg border border-slate-200 p-5 dark:border-slate-800">
           <h2 className="font-medium">Add a property</h2>

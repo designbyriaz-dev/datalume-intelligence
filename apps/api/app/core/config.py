@@ -75,6 +75,26 @@ class Settings(BaseSettings):
     # that Dashboard step is complete.
     stripe_tax_enabled: bool = False
 
+    # Rent Collection v1 (Stripe Connect, pay-by-link) — see
+    # app/services/stripe_connect.py. Disabled by default per the
+    # property-management brief's own instruction: automated rent
+    # collection "must remain disabled until the payment provider has
+    # approved the intended setup." Same pattern as
+    # malware_scanning_enabled above — the account holder flips this
+    # on themselves once their own Stripe Connect platform application
+    # is approved; nothing here can approve it on their behalf.
+    rent_collection_enabled: bool = False
+
+    # A SEPARATE webhook secret from stripe_webhook_secret above —
+    # Stripe Connect events (account.updated, and Checkout/PaymentIntent
+    # events scoped to a connected account) are registered as their own
+    # webhook endpoint in the Dashboard (Connect > Webhooks, not the
+    # main account's Developers > Webhooks), with their own signing
+    # secret. Reusing stripe_webhook_secret would be wrong: that secret
+    # only verifies payloads signed for the platform account's own
+    # endpoint.
+    stripe_connect_webhook_secret: str | None = None
+
     # Where Stripe Checkout/Billing Portal should redirect back to.
     frontend_base_url: str = "http://localhost:3000"
 

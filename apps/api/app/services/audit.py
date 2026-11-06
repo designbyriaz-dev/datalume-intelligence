@@ -67,6 +67,10 @@ EVENT_TYPES = {
     "auth.mfa_verify_failed",
     "auth.account_deleted",
     "workspace.deleted",
+    "rent_collection.connect_account_created",
+    "rent_collection.connect_account_activated",
+    "rent_collection.payment_requested",
+    "rent_collection.payment_received",
 }
 
 

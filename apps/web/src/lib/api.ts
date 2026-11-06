@@ -174,6 +174,26 @@ export interface TenancyBalance {
   balance_gbp: number;
 }
 
+export interface ConnectAccount {
+  id: string;
+  workspace_id: string;
+  stripe_account_id: string;
+  status: "pending" | "onboarding" | "active" | "restricted";
+  charges_enabled: boolean;
+  payouts_enabled: boolean;
+}
+
+export interface PaymentRequest {
+  id: string;
+  ledger_entry_id: string;
+  tenancy_id: string;
+  amount_gbp: number;
+  status: "pending" | "paid" | "expired" | "canceled";
+  tenant_email: string;
+  checkout_url: string;
+  resulting_ledger_entry_id: string | null;
+}
+
 export interface PropertyKPIs {
   total_properties: number;
   active_tenancies: number;
@@ -1328,6 +1348,33 @@ export const api = {
 
   getTenancyBalance: (token: string, tenancyId: string) =>
     request<TenancyBalance>(`/api/v1/tenancies/${tenancyId}/balance`, {}, token),
+
+  getConnectAccount: (token: string, workspaceId: string) =>
+    request<ConnectAccount>(`/api/v1/workspaces/${workspaceId}/rent-collection/connect-account`, {}, token),
+
+  createConnectAccount: (token: string, workspaceId: string) =>
+    request<{ onboarding_url: string }>(
+      `/api/v1/workspaces/${workspaceId}/rent-collection/connect-account`,
+      { method: "POST" },
+      token
+    ),
+
+  refreshConnectOnboardingLink: (token: string, workspaceId: string) =>
+    request<{ onboarding_url: string }>(
+      `/api/v1/workspaces/${workspaceId}/rent-collection/connect-account/refresh-link`,
+      { method: "POST" },
+      token
+    ),
+
+  requestPayment: (token: string, ledgerEntryId: string) =>
+    request<PaymentRequest>(
+      `/api/v1/ledger-entries/${ledgerEntryId}/request-payment`,
+      { method: "POST" },
+      token
+    ),
+
+  listPaymentRequests: (token: string, tenancyId: string) =>
+    request<PaymentRequest[]>(`/api/v1/tenancies/${tenancyId}/payment-requests`, {}, token),
 
   listDocuments: (token: string, propertyId: string, tenancyId?: string) =>
     request<PropertyDocument[]>(

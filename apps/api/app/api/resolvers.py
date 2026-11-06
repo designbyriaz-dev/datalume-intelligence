@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard import Dashboard
 from app.models.dataset import Dataset, DatasetTable, DatasetVersion
-from app.models.property import Property, Tenancy
+from app.models.property import Property, RentLedgerEntry, Tenancy
 from app.models.workspace import Workspace
 
 
@@ -69,3 +69,13 @@ async def get_tenancy_chain_or_404(db: AsyncSession, tenancy_id: str) -> tuple[T
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenancy not found")
     property_, workspace = await get_property_chain_or_404(db, tenancy.property_id)
     return tenancy, property_, workspace
+
+
+async def get_ledger_entry_chain_or_404(
+    db: AsyncSession, ledger_entry_id: str
+) -> tuple[RentLedgerEntry, Tenancy, Property, Workspace]:
+    entry = await db.get(RentLedgerEntry, ledger_entry_id)
+    if entry is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ledger entry not found")
+    tenancy, property_, workspace = await get_tenancy_chain_or_404(db, entry.tenancy_id)
+    return entry, tenancy, property_, workspace
