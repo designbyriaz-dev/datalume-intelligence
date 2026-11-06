@@ -1770,13 +1770,12 @@ cross-cutting an auth change like this is.
   empty afterward, and that navigating back to `/dashboard` correctly
   bounced to `/login` rather than silently staying authenticated; then
   logged back in to confirm the full cycle isn't one-way broken.
-- ⬜ CSRF/refresh cookies are `SameSite=Lax`, which assumes the
-  frontend and backend stay same-site (same registrable domain, as
-  `localhost:3000`/`localhost:8000` are in this environment, and as a
-  typical `app.example.com`/`api.example.com` production split would
-  be). If they ever end up on genuinely different registrable domains,
-  this would need `SameSite=None; Secure` instead — not built
-  speculatively ahead of an actual deployment topology that needs it.
+- ~~CSRF/refresh cookies are `SameSite=Lax`, which assumes the
+  frontend and backend stay same-site~~ — done, see "Post-Phase-7: fix
+  cross-subdomain session loss" above. The deployment topology that
+  needed `SameSite=None; Secure` did arrive (the real Railway frontend
+  and API subdomains are cross-site to each other), and this is now
+  fixed, gated on `environment == "production"`.
 
 ## Post-Phase-7: billing audit-log gaps closed
 
@@ -5463,3 +5462,18 @@ succeeded for real, confirmed via the api service's own deploy logs:
     on the account holder's explicit choice rather than upgrade the
     Railway plan or retune the scan config. Revisit if/when the plan is
     upgraded.
+25. **Pricing/tier restructure: decided against, for now.** The account
+    holder confirmed keeping the current live `free/personal/
+    professional/business/team/enterprise` Stripe plan structure as-is;
+    the brief's "AI credits" tier table stays directional copy only,
+    not something to build. Live billing is unaffected.
+26. **Automated rent collection: provider chosen — Stripe Connect.**
+    The account holder picked Stripe Connect (reuses the Stripe
+    integration already live for billing) over GoCardless/PayProp.
+    Not yet built: this is a real client-money/regulatory-sensitive
+    feature (connected accounts, tenant payment authorisation,
+    webhooks, ledger reconciliation, and — per the brief's own
+    instruction — disabled by default until Stripe approves the
+    intended connected-account setup), so it needs its own scoped plan
+    before any code is written, not a quick addition alongside smaller
+    fixes.
