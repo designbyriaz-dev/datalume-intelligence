@@ -5342,10 +5342,70 @@ behalf.
   the reasoning on each): recurring/auto-debit charging, a tenant
   portal, refunds through Connect, payout reporting dashboards, partial
   payment against a single charge, cancelling a pending payment
-  request. The Phase 3 marketing page at
+  request.
+- ~~The Phase 3 marketing page at
   `apps/web/src/app/rent-collection/page.tsx` still describes this as
-  "planned" and needs a small copy update to reflect v1's real
-  pay-by-link capability — flagged, not yet done.
+  "planned"~~ — done, copy updated to describe the real v1 pay-by-link
+  capability ("Built — switched off until Stripe approval") and
+  confirmed live on production at
+  `web-production-fcfc.up.railway.app/rent-collection`.
+
+### Next step to go live: the account holder's own Stripe Connect platform application
+
+This is the one remaining step, and it is the account holder's own —
+nothing in this codebase or session can register or approve a Connect
+platform application on their behalf (see the "Prohibited actions"
+discussion that led to this being written up rather than attempted).
+
+1. Go to `dashboard.stripe.com/connect/overview` on the existing Stripe
+   account already used for SaaS billing, and start the Connect
+   application. Use **Express accounts** (Stripe hosts KYC/onboarding
+   and payouts go straight to each landlord/agent's own bank — this is
+   exactly what `app/services/stripe_connect.py` is already built
+   against; a "Custom" account would need a KYC UI this app does not
+   have).
+2. Platform/business-description text to paste into the application:
+
+   > DataLume Intelligence is a property-management and
+   > portfolio-analytics platform for landlords and letting agents. We
+   > help our customers track rent ledgers, tenancies, and compliance
+   > across their property portfolios. We're adding an optional feature
+   > that lets a landlord or agent request a one-off rent payment from a
+   > tenant: the tenant receives an emailed link to a Stripe-hosted
+   > Checkout page and pays by card, with no DataLume account required.
+   > We never hold tenant funds ourselves — each landlord/agent has
+   > their own Stripe Express account, and Stripe pays out directly to
+   > their own bank account. This is pay-by-link only; there is no
+   > recurring or auto-debit charging in this version.
+
+   If Stripe's form separately asks who bears loss/refund/chargeback
+   liability: Express accounts put that on the connected account (the
+   landlord/agent), not on DataLume as the platform — correct for this
+   setup and matches what's built.
+3. Once approved, register the webhook endpoint at Stripe Dashboard →
+   **Connect → Webhooks** → "Add endpoint", listening to **"Events on
+   connected accounts"** (not the platform account), pointed at
+   `https://api-production-da93.up.railway.app/api/v1/rent-collection/webhook`.
+   Subscribe to exactly the three event types this codebase actually
+   handles (`app/services/rent_collection_webhook_handlers.py`'s
+   `_HANDLERS` dict — subscribing to more would just be unused noise):
+   - `checkout.session.completed` — marks a payment request paid and
+     credits the rent ledger.
+   - `checkout.session.expired` — marks a payment request expired, no
+     ledger entry created.
+   - `account.updated` — tracks when a connected landlord/agent's
+     account becomes able to accept charges/payouts.
+4. Copy that endpoint's signing secret into Railway's `api` service as
+   `STRIPE_CONNECT_WEBHOOK_SECRET` — **a different secret from the
+   existing `STRIPE_WEBHOOK_SECRET`**, which only verifies the
+   platform account's own SaaS-billing webhook, not Connect events.
+5. Flip `RENT_COLLECTION_ENABLED=true` in Railway, then complete one
+   real onboarding and one real test-mode Checkout payment end-to-end
+   before telling any real customer this is live — same honesty
+   discipline as every other credential-gated integration in this
+   project (Stripe billing, the LLM, SMTP, OIDC all went through a real
+   end-to-end run before being called done, not just a clean 200
+   response).
 
 ## Known limitations in what's built
 
