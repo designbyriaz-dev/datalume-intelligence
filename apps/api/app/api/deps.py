@@ -6,6 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.user import User
@@ -121,16 +122,45 @@ def get_email_sender_optional_dep() -> EmailSender | None:
         return None
 
 
+def _client_ip(request: Request) -> str:
+    """The real client address to key rate-limit buckets on.
+
+    In production (Railway), every request's direct TCP peer is
+    Railway's own internal edge (confirmed live: `request.client.host`
+    is always in the 100.64.0.0/10 CGNAT range, which is unreachable
+    from the public internet) — so without this, every real user
+    collapsed into the same handful of buckets, keyed on the edge's
+    internal hop rather than the actual caller. Verified directly
+    against the live deployment (not assumed) that Railway's edge
+    *rewrites* `X-Real-Ip`/`X-Forwarded-For` rather than appending to
+    client-supplied values: sending a forged `X-Forwarded-For` header
+    had zero effect on what the app received, so trusting it here does
+    not open a spoofing route. `X-Real-Ip` is preferred for being a
+    single clean value; `X-Forwarded-For`'s leftmost entry is the
+    fallback (same value, comma-separated chain). Only trusted when
+    `environment == "production"`, mirroring the dev/production split
+    already used in app/core/cookies.py's `_cookie_security` — in local
+    dev there is no proxy rewriting these headers, so honoring a
+    client-supplied one there would be the spoofing bug this avoids in
+    production."""
+    if get_settings().environment != "production":
+        return request.client.host if request.client else "unknown"
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def rate_limit_dependency(
     bucket_prefix: str, max_requests: int, window_seconds: int
 ) -> Callable[[Request, AsyncSession], Awaitable[None]]:
     """FastAPI dependency factory: `Depends(rate_limit_dependency("login",
     10, 300))` limits a route to 10 requests per 300s per client IP.
-    Keyed on `request.client.host` — this app isn't behind a
-    reverse proxy that sets X-Forwarded-For in this environment, so
-    there's no trusted header to prefer over the direct connection's
-    address; add that translation here (and only here) if that changes,
-    rather than at each call site.
+    Keyed via `_client_ip` above — see its docstring for why this isn't
+    simply `request.client.host` in production.
 
     Raises 429 rather than letting the route run when the bucket is
     over its limit for the current fixed window (see
@@ -138,7 +168,7 @@ def rate_limit_dependency(
     table rather than Redis)."""
 
     async def dependency(request: Request, db: AsyncSession = Depends(get_db)) -> None:
-        client_host = request.client.host if request.client else "unknown"
+        client_host = _client_ip(request)
         bucket_key = f"{bucket_prefix}:{client_host}"
         allowed = await check_rate_limit(
             db, bucket_key=bucket_key, max_requests=max_requests, window_seconds=window_seconds
