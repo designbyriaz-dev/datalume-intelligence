@@ -23,7 +23,8 @@ export default function TermsPage() {
             <p className="mt-3">
               These terms are between you (or the organization you represent) and DataLume
               Intelligence Ltd (&ldquo;DataLume&rdquo;, &ldquo;we&rdquo;, &ldquo;us&rdquo;), a company
-              registered in England and Wales. By creating an account or using the service, you
+              registered in England and Wales (company number 17515059, registered office 66 Paul
+              Street, London, England, EC2A 4NA). By creating an account or using the service, you
               agree to these terms.
             </p>
           </section>
@@ -148,7 +149,7 @@ export default function TermsPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">13. Contact</h2>
             <p className="mt-3">
-              Questions about these terms: riaz@datalume.co.uk.
+              Questions about these terms: support@datalume.co.uk.
             </p>
           </section>
         </div>

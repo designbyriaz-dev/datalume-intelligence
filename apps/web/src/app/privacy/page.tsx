@@ -21,7 +21,8 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Who we are</h2>
             <p className="mt-3">
-              DataLume Intelligence Ltd, a company registered in England and Wales, is the data
+              DataLume Intelligence Ltd, a company registered in England and Wales (company number
+              17515059, registered office 66 Paul Street, London, England, EC2A 4NA), is the data
               controller for your account details and the data processor for the content of files
               your organization uploads. If your organization needs a formal processor agreement in
               place, see the{" "}
@@ -96,7 +97,7 @@ export default function PrivacyPage() {
                 payments and stores your billing/card details on our behalf.
               </li>
               <li>
-                <strong className="text-slate-900 dark:text-white">Our email provider</strong> —
+                <strong className="text-slate-900 dark:text-white">Google (Gmail SMTP)</strong> —
                 sends transactional email (verification, password reset, scheduled report
                 delivery).
               </li>
@@ -144,7 +145,7 @@ export default function PrivacyPage() {
               <li>receive your data in a portable format.</li>
             </ul>
             <p className="mt-3">
-              To exercise any of these, email riaz@datalume.co.uk. You can also complain to the
+              To exercise any of these, email support@datalume.co.uk. You can also complain to the
               UK&rsquo;s Information Commissioner&rsquo;s Office (ico.org.uk) if you think
               we&rsquo;ve handled your data wrongly.
             </p>
@@ -179,7 +180,7 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Contact</h2>
             <p className="mt-3">
-              Questions about this policy, or to exercise any of your rights above: riaz@datalume.co.uk.
+              Questions about this policy, or to exercise any of your rights above: support@datalume.co.uk.
             </p>
           </section>
         </div>

@@ -4578,6 +4578,68 @@ invented encryption/hosting guarantees).
   the DPA page's draft banner renders prominently, and confirmed the
   footer's new Terms link resolves to a real route (not a 404).
 
+### Post-Phase-7 addendum: real company details added, still pending an actual solicitor
+
+The "Draft — pending legal review" banner on all five legal pages
+(Terms, Privacy, Cookies, DPA, Acceptable Use) is deliberately
+unchanged — this session cannot perform or fabricate a legal review,
+only prepare the draft honestly. What changed:
+
+- ✅ **Real company number and registered office added** to Terms,
+  Privacy, and the DPA — previously just said "a company registered in
+  England and Wales" with no identifying detail, which UK trading-
+  disclosure norms generally expect a business to state. Verified
+  directly against the official Companies House register (
+  find-and-update.company-information.service.gov.uk), not guessed or
+  taken from a third-party aggregator: **DATALUME INTELLIGENCE LTD**,
+  company number **17515059**, status Active, incorporated 12 October
+  2026, registered office **66 Paul Street, London, England, EC2A
+  4NA**.
+- ⚠️ **Address discrepancy flagged, not resolved**: that registered
+  office differs from the **18 Adelaide Terrace, Blackburn, Lancashire,
+  BB2 6ET** address already on file in the real Stripe Dashboard for
+  billing/tax purposes (see "Post-Phase-7: dunning flow and VAT via
+  Stripe Tax" above). 66 Paul Street reads like a registered-office
+  formation-agent address (common and legitimate for a small UK
+  company), but which address is "the" one for legal/contact purposes
+  is the account holder's call, not something this session resolved on
+  its own.
+- ✅ **Contact email made consistent**: Terms/Privacy/Cookies/DPA used
+  `riaz@datalume.co.uk`; the newer Acceptable Use and Contact pages use
+  `support@datalume.co.uk`. Per the account holder's explicit choice,
+  all four older pages now use `support@datalume.co.uk` too.
+- ✅ **Email sub-processor named**: Privacy and the DPA named Anthropic,
+  Cloudflare (R2), and Stripe as sub-processors but just said "our
+  email provider" for the one sending transactional email — the only
+  sub-processor not named, inconsistent with the other three. Per the
+  account holder's explicit choice, both now say "Google (Gmail SMTP)"
+  — confirmed against the real `SMTP_HOST` value in `apps/api/.env`,
+  not guessed.
+- ✅ Frontend typecheck clean, 73/73 frontend tests passing, and all
+  four changed pages read live against an isolated dev server on port
+  3100 (the shared :3000 process was left untouched, same discipline as
+  every other live-verification round in this project) to confirm the
+  actual rendered text, not just the source.
+- **Open questions for an actual solicitor, deliberately not decided
+  here** — these are substantive legal judgment calls, not drafting
+  fixes:
+  - **Consumer vs. business-only scope**: the Terms assume a business
+    customer (liability capped at fees paid, no cooling-off period),
+    but nothing currently stops an individual (e.g. a sole landlord
+    without a company) from signing up as a consumer, which would pull
+    in the Consumer Rights Act 2015 and the Consumer Contracts
+    Regulations 2013's 14-day cancellation right — neither addressed.
+    This is the single most consequential open item.
+  - **VAT number**: Stripe Tax is live (see that section above) but no
+    VAT number appears anywhere on the legal pages — only relevant if
+    the business is VAT-registered.
+  - **Backup retention after deletion**: the Privacy Policy says
+    deleting an account removes the underlying data, "not just
+    hidden" — true of the live application tables, but doesn't address
+    whether a deleted account's data could still exist for a period in
+    a database backup snapshot.
+  - **The registered-office vs. trading-address question above.**
+
 ## Post-Phase-7: property records & rent ledger (Phase 1 of the property-management brief)
 
 The user pasted a large new "DataLume Intelligence — Full Master Build

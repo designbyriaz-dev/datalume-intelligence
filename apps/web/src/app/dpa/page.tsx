@@ -23,7 +23,8 @@ export default function DpaPage() {
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">1. Parties and relationship</h2>
             <p className="mt-3">
               This agreement is between the customer organization (&ldquo;Controller&rdquo;) and
-              DataLume Intelligence Ltd (&ldquo;Processor&rdquo;). It applies whenever the
+              DataLume Intelligence Ltd (&ldquo;Processor&rdquo;), company number 17515059,
+              registered office 66 Paul Street, London, England, EC2A 4NA. It applies whenever the
               Processor processes personal data on the Controller&rsquo;s behalf as part of the
               DataLume service, and supplements the Terms of Service.
             </p>
@@ -88,7 +89,7 @@ export default function DpaPage() {
               <li><strong className="text-slate-900 dark:text-white">Anthropic</strong> — AI processing for the AI analyst and AI-generated report summaries.</li>
               <li><strong className="text-slate-900 dark:text-white">Cloudflare (R2)</strong> — object storage for uploaded files and generated reports.</li>
               <li><strong className="text-slate-900 dark:text-white">Stripe</strong> — payment processing and billing data.</li>
-              <li><strong className="text-slate-900 dark:text-white">Our email provider</strong> — transactional email delivery.</li>
+              <li><strong className="text-slate-900 dark:text-white">Google (Gmail SMTP)</strong> — transactional email delivery.</li>
             </ul>
             <p className="mt-3">
               We&rsquo;ll give the Controller reasonable notice before adding a new sub-processor, so
@@ -117,7 +118,7 @@ export default function DpaPage() {
           <section>
             <h2 className="text-xl font-semibold text-slate-900 dark:text-white">9. Contact</h2>
             <p className="mt-3">
-              To discuss or request a countersigned version of this agreement: riaz@datalume.co.uk.
+              To discuss or request a countersigned version of this agreement: support@datalume.co.uk.
             </p>
           </section>
         </div>
