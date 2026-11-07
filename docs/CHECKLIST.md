@@ -777,15 +777,17 @@ below for why.
 
   **What's still not verified**: Okta hasn't been tried, and may have
   its own further quirks — see "Next step: Okta SSO setup checklist"
-  below. The Google app is also still in "Testing" publishing status
-  with one whitelisted test user, not verified/published — see "Next
-  step: Google OAuth publishing checklist" below; the Entra ID app
-  registration is a real, fully-functional app, not gated behind that
-  kind of publishing restriction, but is still single-tenant (only the
-  account holder's own org can sign in) and hasn't been reviewed for
-  production readiness either (token lifetime policy, conditional
-  access) — see "Next step: Azure AD / Entra ID publishing checklist"
-  below and docs/DEPLOYMENT.md.
+  below. The Google app's branding is now fully filled in (real
+  production links, consistent `support@` contact) and Authorized
+  domains already checked out, but it's still in "Testing" publishing
+  status with 3 whitelisted test users — "Publish app" was deliberately
+  left for the account holder's own click, see "Next step: Google OAuth
+  publishing" below. The Entra ID app registration is now multi-tenant
+  ("Allow all tenants") with a real production redirect URI added, but
+  production's live `OIDC_*` env vars still point at Google — the
+  account holder explicitly chose not to switch production over yet —
+  see "Next step: Azure AD / Entra ID publishing" below and
+  docs/DEPLOYMENT.md.
 - ⬜ **SCIM provisioning** — not started. Automated user
   provisioning/deprovisioning from an IdP is a distinct protocol
   (SCIM 2.0) from the OIDC login flow above; building it would mean a
@@ -5665,122 +5667,117 @@ discussion that led to this being written up rather than attempted).
   production deployment manifest** (Kubernetes/Terraform/etc.) — see the
   Phase 7 section above for why each was scoped out this round.
 
-### Next step: Google OAuth publishing checklist (not attempted — moves the existing Google app from "Testing" to public)
+### Next step: Google OAuth publishing (in progress — branding done, "Publish app" deliberately left to the account holder)
 
 Drafted against the real scope request in `app/services/sso.py`
 (`scope="openid email profile"`) and `docs/DEPLOYMENT.md:88-104`'s
 existing notes, not generic Google docs. Same honesty boundary as
-everywhere else in this section: this session can write the checklist
-but cannot publish the app or verify a domain on the account holder's
-behalf.
+everywhere else in this section: this session can configure branding
+fields but will not click the one button that makes the app publicly
+live without the account holder's explicit go-ahead.
 
-**One real wrinkle to check first**: Google's OAuth consent screen's
-"Authorized domains" field requires proving domain ownership via
-Google Search Console. `web-production-fcfc.up.railway.app` sits on
-`up.railway.app`, which is itself on the public suffix list — Google
-may treat that specific subdomain as its own registrable domain
-needing individual verification, not something provable the way a
-domain you actually registered is. If Search Console can't verify it,
-pointing a real custom domain (one the account holder owns) at the
-`web` Railway service first is the practical fix — likely wanted
-before a public launch regardless.
+- ✅ **Branding fields filled and saved**, live on Google Cloud
+  Console's real OAuth consent screen for the DataLume project
+  (`console.cloud.google.com/auth/branding`), driven in the account
+  holder's own signed-in browser: app name ("DataLume Intelligence")
+  was already set; user support email and developer contact email
+  switched from `riaz@` to `support@datalume.co.uk` (the account
+  holder's explicit choice, same as the legal-pages fix above);
+  application home page, privacy policy link, and terms of service
+  link all set to the real production URLs
+  (`https://web-production-fcfc.up.railway.app`,
+  `.../privacy`, `.../terms`) — all three were empty before this.
+- ✅ **The Authorized-domains wrinkle flagged above turned out not to
+  apply**: `web-production-fcfc.up.railway.app` was already a
+  registered Authorized domain — no Search Console verification step
+  was needed this round.
+- ✅ **Confirmed production's env vars already point at this Google
+  client**: checked Railway's real `api` service variables directly —
+  `OIDC_CLIENT_ID` is this Google OAuth client's id (a
+  `...apps.googleusercontent.com` value), not the Entra ID one. No
+  mismatch to fix.
+- ⬜ **"Publish app" not clicked** — this is the account holder's own
+  step. Attempting it was specifically blocked by this session's own
+  safety guardrail as too consequential to do without explicit,
+  in-the-moment confirmation (it removes the 100-test-user cap and
+  makes the app usable by any Google account, not just the 3 current
+  test users). Go to **Audience** in the DataLume Google Cloud project
+  and click **Publish app** directly.
+- ⬜ **Verify it for real** once published: log in with a genuinely new
+  Google account — one never on the old test-user allowlist — through
+  the real `/sso/login` → consent screen → `/dashboard` flow, and
+  confirm the session survives a reload. A status flag flipped in a
+  console isn't "done" until a real login proves it, same discipline as
+  every other integration in this project.
 
-1. Google Cloud Console → the existing **DataLume** project →
-   **APIs & Services → OAuth consent screen**.
-2. Fill out every required branding field (mandatory to publish, not
-   optional metadata): app name, user support email, developer contact
-   email, app logo (optional but recommended), and app domain —
-   **homepage**, **privacy policy**, and **terms of service** links.
-   `/privacy` and `/terms` already exist (see "Post-Phase-7: public
-   page content brief" above) but are marked **draft-pending-legal-review**
-   — get them reviewed/finalized before pointing Google's consent
-   screen at them, since this makes them a real public-facing
-   commitment, not after.
-3. **Authorized domains**: add the domain the redirect URI lives on,
-   and verify it via Search Console if prompted — see the wrinkle
-   above.
-4. **Scopes**: only `openid`/`email`/`profile` are requested — Google's
-   "non-sensitive" basic scopes, which per Google's current policy
-   typically don't require a manual verification review to publish
-   (reviews are mainly for sensitive/restricted scopes). Confirm this
-   directly against the Cloud Console's own banner for this specific
-   app at the time, since Google's exact rules shift.
-5. Click **Publish app** to move it from "Testing" to "In production"
-   — removes the 100-test-user cap and the single-whitelisted-test-user
-   restriction.
-6. **Confirm production's env vars actually point at this Google
-   client**, not the Microsoft Entra ID test values
-   `docs/DEPLOYMENT.md:207` notes are sitting in local `.env` right
-   now — publishing the Google app achieves nothing if Railway is
-   still configured for Entra ID (or vice versa).
-7. **Verify it for real**: log in with a genuinely new Google account
-   — one never on the old test-user allowlist — through the real
-   `/sso/login` → consent screen → `/dashboard` flow, and confirm the
-   session survives a reload. Same discipline as every other
-   integration here: a status flag flipped in a console isn't "done"
-   until a real login proves it.
-
-### Next step: Azure AD / Entra ID publishing checklist (not attempted — a genuinely different kind of gate from Google's)
+### Next step: Azure AD / Entra ID publishing (app registration done — production deliberately left untouched)
 
 Drafted against the real state recorded above (`docs/CHECKLIST.md`'s
 "SSO via OIDC" addendum, `app/services/sso.py`): unlike Google, the
-Entra ID app registration has **no "Testing" status to flip**. It's a
-real, fully-functional app today — but it was created inside the
-account holder's own tenant (`riazdatalumeco.onmicrosoft.com`), so
-right now only people inside that one Microsoft 365 organization can
-sign in. "Publishing" here means moving the app from single-tenant to
-multi-tenant, plus an optional publisher-verification step — a
-different shape of work from Google's Testing→Production toggle.
+Entra ID app registration had **no "Testing" status to flip**. It was
+a real, fully-functional app — but created inside the account holder's
+own tenant (`riazdatalumeco.onmicrosoft.com`), so only people inside
+that one Microsoft 365 organization could sign in. "Publishing" here
+meant moving the app from single-tenant to multi-tenant.
 
-1. **Decide the real audience first**: if real customers will sign in
-   with their *own* Microsoft 365 tenants (the normal case for a B2B
-   SaaS), the app needs to go multi-tenant. If only the account
-   holder's own organization will ever use Microsoft SSO, none of the
-   rest of this is needed and the app is already fine as-is.
-2. Microsoft Entra admin center → **App registrations → DataLume
-   Intelligence → Authentication → Supported account types** → change
-   to "Accounts in any organizational directory (Any Microsoft Entra
-   ID tenant - Multitenant)". This is the actual publisher-equivalent
-   step here — there is no separate Testing/Production toggle the way
-   Google has.
-3. **Update `OIDC_DISCOVERY_URL`**: the code currently points at the
-   tenant-specific endpoint
-   (`https://login.microsoftonline.com/<tenant>/v2.0/.well-known/openid-configuration`,
-   per the "SSO via OIDC" addendum above). A single-tenant discovery
-   URL rejects tokens from other tenants' users even after the
-   audience change in step 2 — this needs to become the
-   `/organizations/v2.0/` endpoint (or `/common/v2.0/` to also allow
-   personal Microsoft accounts, not just work/school ones) before
-   multi-tenant logins will actually succeed.
-4. **Consent**: `openid`/`email`/`profile` are basic scopes that
-   normally only need per-user consent, not a tenant admin's. Some
-   organizations lock down user consent entirely by policy — there's
-   no universal fix for that; those customers' own Azure admins will
-   need to grant consent on their org's behalf via an admin-consent
-   URL. Not something to solve generically, just something to expect
-   support requests about.
-5. **Publisher verification** (optional, but the real trust-signal
-   equivalent of Google's review): register for the Microsoft Partner
-   Network (MPN), verify it, and link it to this app registration.
-   Without it, external users see an "unverified publisher" warning on
-   the consent screen — not blocking, but worth doing before a real
-   public push, same reasoning as Google's verification badge.
-6. **Branding**: Enterprise Applications → this app → branding fields
-   (logo, home page URL, terms of service URL, privacy statement URL).
-   Same legal-pages dependency as the Google checklist above —
-   `/terms` and `/privacy` are still marked draft-pending-legal-review;
-   finalize before pointing Microsoft's consent screen at them.
-7. **Review token lifetime policy and conditional access** — flagged
-   above as never reviewed. Decide real session/token lifetimes
-   deliberately rather than leaving Microsoft's defaults unexamined.
-8. **Verify it for real**: sign in with an account from a genuinely
-   different Microsoft tenant — not `riazdatalumeco.onmicrosoft.com` —
-   through the real `/sso/login` → Microsoft consent → `/sso/callback`
-   → `/dashboard` flow, confirm the session survives a reload, and
-   confirm production's `OIDC_DISCOVERY_URL`/`OIDC_CLIENT_ID` were
-   actually updated to the multi-tenant endpoint before concluding this
-   works — not just that the app registration's settings page shows
-   the new audience.
+- ✅ **Decided the real audience**: the account holder confirmed real
+  customers signing in with their own Microsoft 365 tenants is the
+  intended case, so the app needed to go multi-tenant.
+- ✅ **Supported account types changed and saved**, live on the real
+  app registration (Microsoft Entra admin center → App registrations →
+  DataLume Intelligence → Authentication → Supported accounts): from
+  "Single tenant only - Default Directory" to **"Multiple Entra ID
+  tenants" / "Allow all tenants"** — confirmed via Entra's own
+  "Successfully updated DataLume Intelligence" toast, not assumed.
+  (One near-miss worth noting for anyone repeating this: an early click
+  aimed at the Save button landed on the wrong radio option instead,
+  silently flipping the selection to "Allow only certain tenants" — a
+  layout shift after picking "Multiple Entra ID tenants" from the
+  dropdown moved the Save button's position. Caught by re-screenshotting
+  before trusting the click, fixed by using the page's own element
+  references instead of guessed coordinates for the retry.)
+- ✅ **Real production redirect URI added**: the app registration only
+  had `http://localhost:3000/sso/callback` before this — added
+  `https://web-production-fcfc.up.railway.app/sso/callback` alongside
+  it. Without this, multi-tenant logins would have had nowhere valid to
+  redirect back to in production even after the audience change.
+- ⬜ **Production's `OIDC_DISCOVERY_URL`/`OIDC_CLIENT_ID` deliberately
+  NOT changed**: checking Railway's real `api` service variables
+  revealed production is currently configured for **Google** SSO, not
+  Entra ID (`OIDC_CLIENT_ID` there is a Google client id, not
+  Microsoft's) — the single-provider constraint flagged in the Okta
+  checklist above is real, not hypothetical. Swapping Railway's
+  `OIDC_*` vars to the Entra values now would disable Google sign-in
+  for any real user currently using it. Given a direct choice, the
+  account holder chose to **leave production on Google for now** — the
+  Entra ID app registration is ready and waiting whenever that
+  switch is actually wanted, but the live `OIDC_DISCOVERY_URL` still
+  points at the old single-tenant endpoint
+  (`https://login.microsoftonline.com/<tenant>/v2.0/...`), not the
+  `/organizations/v2.0/` one multi-tenant logins need.
+- ⬜ **Consent**: `openid`/`email`/`profile` are basic scopes that
+  normally only need per-user consent, not a tenant admin's. Some
+  organizations lock down user consent entirely by policy — there's no
+  universal fix for that; those customers' own Azure admins will need
+  to grant consent on their org's behalf via an admin-consent URL. Not
+  something to solve generically, just something to expect support
+  requests about.
+- ⬜ **Publisher verification** (optional, the real trust-signal
+  equivalent of Google's review): register for the Microsoft Partner
+  Network (MPN), verify it, link it to this app registration. Without
+  it, external users see an "unverified publisher" warning — not
+  blocking, but worth doing before a real public push.
+- ⬜ **Branding**: Enterprise Applications → this app → branding fields
+  (logo, home page URL, terms of service URL, privacy statement URL) —
+  not yet set, same legal-pages URLs as the Google branding above would
+  apply here too.
+- ⬜ **Review token lifetime policy and conditional access** — never
+  reviewed; Microsoft's defaults are still in effect, un-examined.
+- ⬜ **Verify it for real** once production is actually switched: sign
+  in with an account from a genuinely different Microsoft tenant — not
+  `riazdatalumeco.onmicrosoft.com` — through the real `/sso/login` →
+  Microsoft consent → `/sso/callback` → `/dashboard` flow, and confirm
+  the session survives a reload.
 
 ### Next step: Okta SSO setup checklist (not attempted — needs the account holder's own Okta org)
 
