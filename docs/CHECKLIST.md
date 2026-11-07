@@ -777,12 +777,12 @@ below for why.
 
   **What's still not verified**: Okta hasn't been tried, and may have
   its own further quirks — see "Next step: Okta SSO setup checklist"
-  below. The Google app's branding is now fully filled in (real
-  production links, consistent `support@` contact) and Authorized
-  domains already checked out, but it's still in "Testing" publishing
-  status with 3 whitelisted test users — "Publish app" was deliberately
-  left for the account holder's own click, see "Next step: Google OAuth
-  publishing" below. The Entra ID app registration is now multi-tenant
+  below. ~~The Google app was in "Testing" publishing status~~ — now
+  **published to production** with the account holder's explicit
+  go-ahead, see "Post-Phase-7: Google OAuth app published to
+  production" below — any Google account can now reach the real
+  consent screen, not just the 3 prior test users. The Entra ID app
+  registration is now multi-tenant
   ("Allow all tenants") with a real production redirect URI added, but
   production's live `OIDC_*` env vars still point at Google — the
   account holder explicitly chose not to switch production over yet —
@@ -5674,7 +5674,7 @@ discussion that led to this being written up rather than attempted).
   production deployment manifest** (Kubernetes/Terraform/etc.) — see the
   Phase 7 section above for why each was scoped out this round.
 
-### Next step: Google OAuth publishing (in progress — branding done, "Publish app" deliberately left to the account holder)
+### Post-Phase-7: Google OAuth app published to production
 
 Drafted against the real scope request in `app/services/sso.py`
 (`scope="openid email profile"`) and `docs/DEPLOYMENT.md:88-104`'s
@@ -5703,19 +5703,26 @@ live without the account holder's explicit go-ahead.
   `OIDC_CLIENT_ID` is this Google OAuth client's id (a
   `...apps.googleusercontent.com` value), not the Entra ID one. No
   mismatch to fix.
-- ⬜ **"Publish app" not clicked** — this is the account holder's own
-  step. Attempting it was specifically blocked by this session's own
-  safety guardrail as too consequential to do without explicit,
-  in-the-moment confirmation (it removes the 100-test-user cap and
-  makes the app usable by any Google account, not just the 3 current
-  test users). Go to **Audience** in the DataLume Google Cloud project
-  and click **Publish app** directly.
-- ⬜ **Verify it for real** once published: log in with a genuinely new
-  Google account — one never on the old test-user allowlist — through
-  the real `/sso/login` → consent screen → `/dashboard` flow, and
-  confirm the session survives a reload. A status flag flipped in a
-  console isn't "done" until a real login proves it, same discipline as
-  every other integration in this project.
+- ✅ **"Publish app" clicked and confirmed**, with the account holder's
+  explicit go-ahead (this specific click was first blocked by this
+  session's own safety guardrail as too consequential to do without
+  that explicit, in-the-moment confirmation — correctly so, since it
+  removes the 100-test-user cap and makes the app usable by any Google
+  account, not just the 3 prior test users). Google's own "Push to
+  production?" confirmation dialog stated no verification submission
+  would be required (app has no logo, fewer than 10 domains, only
+  non-sensitive scopes) — matching what this checklist predicted
+  earlier, not assumed. **Publishing status now reads "In production"**
+  on the real Audience page, confirmed directly, with a "Back to
+  testing" option still available if ever needed.
+- **Still open, lower priority**: a fresh login with a genuinely new
+  Google account (one never on the old test-user allowlist) hasn't
+  been re-run post-publish. This mainly proves Google's own gate opened
+  — the app's OIDC code path itself was already proven end-to-end
+  against this same client while it was still in Testing (see the
+  "SSO via OIDC" section above), and publishing status doesn't change
+  that code path, only which Google accounts are allowed to reach the
+  consent screen at all.
 
 ### Next step: Azure AD / Entra ID publishing (app registration done — production deliberately left untouched)
 
