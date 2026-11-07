@@ -5413,6 +5413,72 @@ client code in `app/services/storage.py`.
    alongside R2 if AWS S3 is wanted as a real alternative backend later
    — a deliberate choice either way, not left dangling.
 
+### Next step: Postgres concurrent-write test checklist (not attempted — narrower than it sounds, see below)
+
+Drafted against the real precedent already in this codebase, not a
+generic "test concurrency" idea. There's already real Postgres test
+infra (`POSTGRES_TEST_DATABASE_URL`, a `backend-tests-postgres` CI job,
+a local Postgres 16 verification — see "Post-Phase-7: verify the test
+suite against real Postgres" above). The actual gap is narrower than
+"never tested against Postgres": the one live concurrency proof that
+exists (the distributed scheduler lock, see "Post-Phase-7: distributed
+scheduler lock" above) raced two engines against real **SQLite**, not
+Postgres — the claim "this holds under both SQLite and Postgres" was
+reasoned from first principles (an atomic conditional `UPDATE`), never
+demonstrated with a real race against Postgres specifically.
+
+1. **Reuse the existing infra**, don't reinvent it: the same
+   `POSTGRES_TEST_DATABASE_URL`-pointed local Postgres 16 database and
+   connection string shape the `backend-tests-postgres` CI job already
+   uses.
+2. Write a dedicated test file, `tests/test_postgres_concurrency.py`,
+   skipped unless `POSTGRES_TEST_DATABASE_URL` is set — mirroring the
+   skip pattern already used for `test_s3_storage_r2.py`/
+   `test_s3_storage_minio.py`.
+3. **Use two genuinely independent `AsyncEngine`/session instances**
+   against the same real database — standing in for two separate API
+   processes, the exact distinction the distributed-lock section's own
+   write-up draws ("not two coroutines sharing one connection"). Two
+   sessions sharing a connection would prove nothing about real
+   multi-process concurrency.
+4. **The detail the SQLite proof didn't need**: use an `asyncio.Event`
+   (or similar barrier) so both sessions reach the actual contended
+   operation before either is allowed to proceed, then release both via
+   `asyncio.gather`. Without a barrier, the event loop can just run one
+   to completion before the other starts — that would silently pass
+   while proving nothing, the same trap this project's own write-up
+   calls out about sequential test assertions elsewhere.
+5. **Two things specifically worth racing**, since both already have a
+   claimed-but-unproven-against-Postgres answer:
+   - **`distributed_lock.try_acquire_lock`** — redo the exact proof
+     already done against SQLite, this time against real Postgres: two
+     sessions race to acquire the same `lock_id`; assert exactly one
+     succeeds and the other gets nothing.
+   - **Rent collection webhook idempotency**
+     (`ProcessedWebhookEvent.stripe_event_id`'s unique constraint) —
+     the existing regression test
+     (`test_duplicate_webhook_delivery_does_not_double_credit_ledger`)
+     posts the same payload **sequentially twice**, not truly
+     concurrently. Redo it as a genuine race: two sessions attempt to
+     insert the same `stripe_event_id` at the same instant; assert one
+     succeeds, one raises `IntegrityError` on the unique constraint,
+     and exactly one `payment` ledger entry results — not zero, not
+     two.
+6. **Run it against real local Postgres first**, not just adding it to
+   CI blind — same discipline the original Postgres-verification round
+   used (installed Postgres locally, ran against the exact CI
+   connection string, before trusting the CI job definition).
+7. **Document the honest result either way**: if both race cleanly (one
+   winner, one loses safely), say so plainly rather than implying this
+   was ever in doubt; if a real bug surfaces, it joins the same "found
+   and fixed" pattern as the datetime timezone bug the original
+   Postgres-verification round caught.
+8. **Decide deliberately whether this joins CI permanently** or stays a
+   manual, occasionally-run check — a true concurrency test with an
+   artificial barrier adds real runtime and a small amount of flakiness
+   risk to a CI job that currently runs on every push, worth a
+   conscious choice rather than defaulting either way.
+
 ### Next step to go live: the account holder's own Stripe Connect platform application
 
 This is the one remaining step, and it is the account holder's own —
@@ -5484,7 +5550,9 @@ discussion that led to this being written up rather than attempted).
   (datetime timezone round-tripping); concurrent-write behavior
   specifically still isn't exercised by any test (SQLite or Postgres) —
   this closes the "never run against real Postgres at all" gap, not
-  every possible Postgres-specific scenario.
+  every possible Postgres-specific scenario. See "Next step: Postgres
+  concurrent-write test checklist" below for exactly what's needed to
+  close that narrower remaining gap.
 - **`JWT_SECRET` has an insecure default** — the app will run with it, but
   anyone deploying beyond localhost must override it (see docs/SECURITY.md).
 - ~~Organizations: no way to remove a member or change their role once
