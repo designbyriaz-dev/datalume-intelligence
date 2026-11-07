@@ -5468,13 +5468,70 @@ discussion that led to this being written up rather than attempted).
   unlike Google). Okta remains untried — see "Next step: Okta SSO setup
   checklist" below for exactly what's needed to try it. The Google app
   itself is still in "Testing" publishing status with a single
-  whitelisted test user — see docs/DEPLOYMENT.md.
+  whitelisted test user — see docs/DEPLOYMENT.md and "Next step: Google
+  OAuth publishing checklist" below for exactly what's needed to
+  publish it.
 - ~~Personal (non-org) subscription plan changes aren't audit-logged~~ —
   done, see "Post-Phase-7: personal subscription plan changes now
   audit-logged" below.
 - **No SCIM provisioning, no custom roles beyond the fixed five, no
   production deployment manifest** (Kubernetes/Terraform/etc.) — see the
   Phase 7 section above for why each was scoped out this round.
+
+### Next step: Google OAuth publishing checklist (not attempted — moves the existing Google app from "Testing" to public)
+
+Drafted against the real scope request in `app/services/sso.py`
+(`scope="openid email profile"`) and `docs/DEPLOYMENT.md:88-104`'s
+existing notes, not generic Google docs. Same honesty boundary as
+everywhere else in this section: this session can write the checklist
+but cannot publish the app or verify a domain on the account holder's
+behalf.
+
+**One real wrinkle to check first**: Google's OAuth consent screen's
+"Authorized domains" field requires proving domain ownership via
+Google Search Console. `web-production-fcfc.up.railway.app` sits on
+`up.railway.app`, which is itself on the public suffix list — Google
+may treat that specific subdomain as its own registrable domain
+needing individual verification, not something provable the way a
+domain you actually registered is. If Search Console can't verify it,
+pointing a real custom domain (one the account holder owns) at the
+`web` Railway service first is the practical fix — likely wanted
+before a public launch regardless.
+
+1. Google Cloud Console → the existing **DataLume** project →
+   **APIs & Services → OAuth consent screen**.
+2. Fill out every required branding field (mandatory to publish, not
+   optional metadata): app name, user support email, developer contact
+   email, app logo (optional but recommended), and app domain —
+   **homepage**, **privacy policy**, and **terms of service** links.
+   `/privacy` and `/terms` already exist (see "Post-Phase-7: public
+   page content brief" above) but are marked **draft-pending-legal-review**
+   — get them reviewed/finalized before pointing Google's consent
+   screen at them, since this makes them a real public-facing
+   commitment, not after.
+3. **Authorized domains**: add the domain the redirect URI lives on,
+   and verify it via Search Console if prompted — see the wrinkle
+   above.
+4. **Scopes**: only `openid`/`email`/`profile` are requested — Google's
+   "non-sensitive" basic scopes, which per Google's current policy
+   typically don't require a manual verification review to publish
+   (reviews are mainly for sensitive/restricted scopes). Confirm this
+   directly against the Cloud Console's own banner for this specific
+   app at the time, since Google's exact rules shift.
+5. Click **Publish app** to move it from "Testing" to "In production"
+   — removes the 100-test-user cap and the single-whitelisted-test-user
+   restriction.
+6. **Confirm production's env vars actually point at this Google
+   client**, not the Microsoft Entra ID test values
+   `docs/DEPLOYMENT.md:207` notes are sitting in local `.env` right
+   now — publishing the Google app achieves nothing if Railway is
+   still configured for Entra ID (or vice versa).
+7. **Verify it for real**: log in with a genuinely new Google account
+   — one never on the old test-user allowlist — through the real
+   `/sso/login` → consent screen → `/dashboard` flow, and confirm the
+   session survives a reload. Same discipline as every other
+   integration here: a status flag flipped in a console isn't "done"
+   until a real login proves it.
 
 ### Next step: Okta SSO setup checklist (not attempted — needs the account holder's own Okta org)
 
