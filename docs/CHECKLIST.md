@@ -776,13 +776,16 @@ below for why.
   "only Google has been tried."
 
   **What's still not verified**: Okta hasn't been tried, and may have
-  its own further quirks. The Google app is also still in "Testing"
-  publishing status with one whitelisted test user, not
-  verified/published; the Entra ID app registration is a real,
-  fully-functional app, not gated behind that kind of publishing
-  restriction, but hasn't been reviewed for production readiness
-  either (token lifetime policy, conditional access). See
-  docs/DEPLOYMENT.md.
+  its own further quirks — see "Next step: Okta SSO setup checklist"
+  below. The Google app is also still in "Testing" publishing status
+  with one whitelisted test user, not verified/published — see "Next
+  step: Google OAuth publishing checklist" below; the Entra ID app
+  registration is a real, fully-functional app, not gated behind that
+  kind of publishing restriction, but is still single-tenant (only the
+  account holder's own org can sign in) and hasn't been reviewed for
+  production readiness either (token lifetime policy, conditional
+  access) — see "Next step: Azure AD / Entra ID publishing checklist"
+  below and docs/DEPLOYMENT.md.
 - ⬜ **SCIM provisioning** — not started. Automated user
   provisioning/deprovisioning from an IdP is a distinct protocol
   (SCIM 2.0) from the OIDC login flow above; building it would mean a
@@ -5532,6 +5535,68 @@ before a public launch regardless.
    session survives a reload. Same discipline as every other
    integration here: a status flag flipped in a console isn't "done"
    until a real login proves it.
+
+### Next step: Azure AD / Entra ID publishing checklist (not attempted — a genuinely different kind of gate from Google's)
+
+Drafted against the real state recorded above (`docs/CHECKLIST.md`'s
+"SSO via OIDC" addendum, `app/services/sso.py`): unlike Google, the
+Entra ID app registration has **no "Testing" status to flip**. It's a
+real, fully-functional app today — but it was created inside the
+account holder's own tenant (`riazdatalumeco.onmicrosoft.com`), so
+right now only people inside that one Microsoft 365 organization can
+sign in. "Publishing" here means moving the app from single-tenant to
+multi-tenant, plus an optional publisher-verification step — a
+different shape of work from Google's Testing→Production toggle.
+
+1. **Decide the real audience first**: if real customers will sign in
+   with their *own* Microsoft 365 tenants (the normal case for a B2B
+   SaaS), the app needs to go multi-tenant. If only the account
+   holder's own organization will ever use Microsoft SSO, none of the
+   rest of this is needed and the app is already fine as-is.
+2. Microsoft Entra admin center → **App registrations → DataLume
+   Intelligence → Authentication → Supported account types** → change
+   to "Accounts in any organizational directory (Any Microsoft Entra
+   ID tenant - Multitenant)". This is the actual publisher-equivalent
+   step here — there is no separate Testing/Production toggle the way
+   Google has.
+3. **Update `OIDC_DISCOVERY_URL`**: the code currently points at the
+   tenant-specific endpoint
+   (`https://login.microsoftonline.com/<tenant>/v2.0/.well-known/openid-configuration`,
+   per the "SSO via OIDC" addendum above). A single-tenant discovery
+   URL rejects tokens from other tenants' users even after the
+   audience change in step 2 — this needs to become the
+   `/organizations/v2.0/` endpoint (or `/common/v2.0/` to also allow
+   personal Microsoft accounts, not just work/school ones) before
+   multi-tenant logins will actually succeed.
+4. **Consent**: `openid`/`email`/`profile` are basic scopes that
+   normally only need per-user consent, not a tenant admin's. Some
+   organizations lock down user consent entirely by policy — there's
+   no universal fix for that; those customers' own Azure admins will
+   need to grant consent on their org's behalf via an admin-consent
+   URL. Not something to solve generically, just something to expect
+   support requests about.
+5. **Publisher verification** (optional, but the real trust-signal
+   equivalent of Google's review): register for the Microsoft Partner
+   Network (MPN), verify it, and link it to this app registration.
+   Without it, external users see an "unverified publisher" warning on
+   the consent screen — not blocking, but worth doing before a real
+   public push, same reasoning as Google's verification badge.
+6. **Branding**: Enterprise Applications → this app → branding fields
+   (logo, home page URL, terms of service URL, privacy statement URL).
+   Same legal-pages dependency as the Google checklist above —
+   `/terms` and `/privacy` are still marked draft-pending-legal-review;
+   finalize before pointing Microsoft's consent screen at them.
+7. **Review token lifetime policy and conditional access** — flagged
+   above as never reviewed. Decide real session/token lifetimes
+   deliberately rather than leaving Microsoft's defaults unexamined.
+8. **Verify it for real**: sign in with an account from a genuinely
+   different Microsoft tenant — not `riazdatalumeco.onmicrosoft.com` —
+   through the real `/sso/login` → Microsoft consent → `/sso/callback`
+   → `/dashboard` flow, confirm the session survives a reload, and
+   confirm production's `OIDC_DISCOVERY_URL`/`OIDC_CLIENT_ID` were
+   actually updated to the multi-tenant endpoint before concluding this
+   works — not just that the app registration's settings page shows
+   the new audience.
 
 ### Next step: Okta SSO setup checklist (not attempted — needs the account holder's own Okta org)
 
