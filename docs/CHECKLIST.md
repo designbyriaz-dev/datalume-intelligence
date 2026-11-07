@@ -4595,15 +4595,18 @@ only prepare the draft honestly. What changed:
   company number **17515059**, status Active, incorporated 12 October
   2026, registered office **66 Paul Street, London, England, EC2A
   4NA**.
-- ⚠️ **Address discrepancy flagged, not resolved**: that registered
-  office differs from the **18 Adelaide Terrace, Blackburn, Lancashire,
-  BB2 6ET** address already on file in the real Stripe Dashboard for
-  billing/tax purposes (see "Post-Phase-7: dunning flow and VAT via
-  Stripe Tax" above). 66 Paul Street reads like a registered-office
-  formation-agent address (common and legitimate for a small UK
-  company), but which address is "the" one for legal/contact purposes
-  is the account holder's call, not something this session resolved on
-  its own.
+- ✅ **Address discrepancy resolved**: that registered office differs
+  from the **18 Adelaide Terrace, Blackburn, Lancashire, BB2 6ET**
+  address already on file in the real Stripe Dashboard for billing/tax
+  purposes (see "Post-Phase-7: dunning flow and VAT via Stripe Tax"
+  above) — 66 Paul Street reads like a registered-office formation-
+  agent address (common and legitimate for a small UK company). Per
+  the account holder's explicit choice, the public legal pages use the
+  real Companies House registered office (66 Paul Street, London) as
+  "the" address; Stripe's own billing/tax profile is a separate
+  internal detail, left untouched (changing it would mean logging into
+  the account holder's own Stripe account, not something done
+  unprompted).
 - ✅ **Contact email made consistent**: Terms/Privacy/Cookies/DPA used
   `riaz@datalume.co.uk`; the newer Acceptable Use and Contact pages use
   `support@datalume.co.uk`. Per the account holder's explicit choice,
@@ -4638,7 +4641,6 @@ only prepare the draft honestly. What changed:
     hidden" — true of the live application tables, but doesn't address
     whether a deleted account's data could still exist for a period in
     a database backup snapshot.
-  - **The registered-office vs. trading-address question above.**
 
 ## Post-Phase-7: property records & rent ledger (Phase 1 of the property-management brief)
 
