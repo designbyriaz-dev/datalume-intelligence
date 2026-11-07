@@ -5353,6 +5353,66 @@ behalf.
   confirmed live on production at
   `web-production-fcfc.up.railway.app/rent-collection`.
 
+### Next step: AWS S3 verification checklist (not attempted — closes the last gap left after the real R2 verification above)
+
+Drafted by mirroring `tests/test_s3_storage_r2.py`'s own real pattern,
+not generic AWS docs. R2 is the real production storage backend today
+(`apps/api/.env` holds real R2 credentials) — this does **not** mean
+switching production away from R2, only proving the AWS code path
+genuinely works too, since R2 and AWS S3 share the exact same boto3
+client code in `app/services/storage.py`.
+
+1. AWS Console → S3 → **create a bucket manually**, noting its real
+   region — `s3_region` defaults to `eu-west-2` in
+   `app/core/config.py`, which must match the bucket's actual region
+   or the request will fail on a `LocationConstraint` mismatch.
+2. IAM → create a **dedicated least-privilege user** (never use root
+   account keys), with an inline policy scoped to exactly:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+       "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/*"
+     }]
+   }
+   ```
+   Deliberately no `s3:CreateBucket`/`s3:ListAllMyBuckets` — same
+   reasoning the R2 test's own docstring gives: this proves the real
+   production credential shape (object-level access to a
+   pre-provisioned bucket), not a broader admin shape the real
+   deployment won't use.
+3. Generate an access key ID + secret access key for that IAM user.
+4. Write `tests/test_s3_storage_aws.py` as a near-exact copy of
+   `test_s3_storage_r2.py`'s structure (same write/read/delete/
+   overwrite/missing-key/binary-round-trip cases, same uuid-prefixed
+   keys cleaned up in a `finally` block so it's safe to re-run against
+   a real bucket). Two differences from the R2 version worth testing
+   deliberately, not assuming: no `S3_ENDPOINT_URL` is needed (boto3's
+   default AWS endpoint construction should just work, unlike
+   R2/MinIO), and the region must be passed through explicitly since
+   real AWS — unlike R2 — is actually region-sensitive for request
+   signing.
+5. Env vars to supply when running it (mirroring the `R2_TEST_*`
+   pattern, never hardcoded):
+   ```bash
+   export AWS_TEST_ACCESS_KEY=<access key id>
+   export AWS_TEST_SECRET_KEY=<secret access key>
+   export AWS_TEST_REGION=<the bucket's real region>
+   export AWS_TEST_BUCKET=<your bucket name>
+   pytest tests/test_s3_storage_aws.py -v
+   ```
+6. Once it passes, fix `app/services/storage.py`'s own module
+   docstring (currently still says "Still not proven: a real AWS S3 or
+   Cloudflare R2 bucket" — already half-stale since R2 was verified in
+   an earlier round) rather than leaving a doc comment that contradicts
+   this checklist.
+7. Afterward: delete that IAM user's access key if this was a one-off
+   verification, or keep it as a genuine second storage option
+   alongside R2 if AWS S3 is wanted as a real alternative backend later
+   — a deliberate choice either way, not left dangling.
+
 ### Next step to go live: the account holder's own Stripe Connect platform application
 
 This is the one remaining step, and it is the account holder's own —
@@ -5442,7 +5502,8 @@ discussion that led to this being written up rather than attempted).
   bucket, not `LocalFilesystemStorage`. AWS S3 itself (as opposed to
   R2, its S3-compatible cousin) remains untried — a smaller gap than
   before, since R2 and AWS S3 share the exact same client code path and
-  API surface in `app/services/storage.py`.
+  API surface in `app/services/storage.py` — see "Next step: AWS S3
+  verification checklist" below for exactly what's needed to close it.
 - ~~Upload processing is synchronous (inside the request), not a
   background job~~ — done (lightweight scope: a FastAPI
   `BackgroundTasks` callback in the existing API process, not a
