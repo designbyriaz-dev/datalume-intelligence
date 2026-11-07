@@ -29,10 +29,19 @@ blocks CI — run it for real with `brew install minio && minio server
 /tmp/some-dir --address :9000` (or `docker compose up minio`), then
 `pytest tests/test_s3_storage_minio.py`.
 
-Still not proven: a real AWS S3 or Cloudflare R2 bucket — MinIO's
-leniency is now confirmed, not just assumed, but that's a reason for
-more caution in production against real AWS, not less, since AWS is
-the strict one. See docs/DEPLOYMENT.md.
+Also verified against a real Cloudflare R2 bucket
+(tests/test_s3_storage_r2.py) and a real AWS S3 bucket
+(tests/test_s3_storage_aws.py), each with a least-privilege credential
+scoped to one pre-existing bucket (no bucket-create/list-all-buckets
+permission), proving the actual production credential shape rather
+than a broader admin one. AWS specifically surfaced a real gap MinIO's
+leniency had hidden: __init__'s head_bucket call needs s3:ListBucket
+permission on the bucket itself (bucket-level, not object-level) to
+succeed with a 200 rather than fall through to the create_bucket
+branch below, which a least-privilege policy correctly refuses —
+object-level GetObject/PutObject/DeleteObject permissions alone were
+not enough. Both test files skip themselves unless real credentials are
+supplied via env vars, so neither blocks CI.
 """
 
 from __future__ import annotations
